@@ -5,6 +5,7 @@ import '../../../../core/models/service.dart';
 import '../../../../core/theme/mt_colors.dart';
 import '../../../../core/theme/mt_text_styles.dart';
 import '../../../../core/widgets/mt_empty_state.dart';
+import '../../../../core/widgets/mt_search_field.dart';
 import '../../../../core/widgets/mt_error_state.dart';
 import '../../admin_providers.dart';
 import '../../widgets/more_filters_sheet.dart';
@@ -77,26 +78,11 @@ class _ReviewQueueTabState extends ConsumerState<ReviewQueueTab> {
                   SizedBox(
                     width: 250,
                     height: 40,
-                    child: TextField(
+                    child: MtSearchField(
+                      dense: true,
                       controller: _searchController,
                       onChanged: _onSearchChanged,
-                      decoration: InputDecoration(
-                        hintText: 'Search ID, patient, area...',
-                        prefixIcon: const Icon(Icons.search,
-                            size: 18, color: MtColors.ink3),
-                        contentPadding: EdgeInsets.zero,
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: MtColors.line),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: MtColors.line),
-                        ),
-                      ),
-                      style: MtTextStyles.bodyMd,
+                      hintText: 'Search ID, patient, area...',
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -371,9 +357,20 @@ class _ReviewQueueTabState extends ConsumerState<ReviewQueueTab> {
                           confirmColor: MtColors.rejected,
                         );
                         if (!ok || !context.mounted) return;
-                        await ref
-                            .read(adminRequestsProvider.notifier)
-                            .bulkUpdateStatus(selectedIds, 'rejected');
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          await ref
+                              .read(adminRequestsProvider.notifier)
+                              .bulkUpdateStatus(selectedIds, 'rejected');
+                        } catch (e) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Could not reject: $e'),
+                              backgroundColor: MtColors.rejected,
+                            ),
+                          );
+                          return;
+                        }
                         if (!context.mounted) return;
                         ref.read(selectedRequestIdsProvider.notifier).state =
                             {};
@@ -399,9 +396,20 @@ class _ReviewQueueTabState extends ConsumerState<ReviewQueueTab> {
                           confirmColor: MtColors.brand,
                         );
                         if (!ok || !context.mounted) return;
-                        await ref
-                            .read(adminRequestsProvider.notifier)
-                            .bulkUpdateStatus(selectedIds, 'approved');
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          await ref
+                              .read(adminRequestsProvider.notifier)
+                              .bulkUpdateStatus(selectedIds, 'approved');
+                        } catch (e) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Could not approve: $e'),
+                              backgroundColor: MtColors.rejected,
+                            ),
+                          );
+                          return;
+                        }
                         if (!context.mounted) return;
                         ref.read(selectedRequestIdsProvider.notifier).state =
                             {};

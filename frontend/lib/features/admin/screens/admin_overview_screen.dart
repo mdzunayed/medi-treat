@@ -6,9 +6,13 @@ import '../../../core/models/user.dart';
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
+import '../../../core/widgets/mt_search_field.dart';
 import '../../auth/auth_provider.dart';
 import '../../notifications/widgets/notification_bell.dart';
 import '../admin_providers.dart';
+import 'tabs/admin_banner_management_page.dart';
+import 'tabs/admin_booking_review.dart';
+import 'tabs/admin_home_sections_page.dart';
 import 'tabs/assign_team_tab.dart';
 import 'tabs/billing_tab.dart';
 import 'tabs/live_monitor_tab.dart';
@@ -40,11 +44,11 @@ class _AdminOverviewScreenState extends ConsumerState<AdminOverviewScreen> {
 
   // Indices are referenced by the sidebar `_SidebarItem`s below — keep
   // these in lockstep with that list when reordering.
-  //   0 Overview          5 Providers
-  //   1 Review queue      6 Patients
+  //   0 Overview          5 Providers        10 Booking review
+  //   1 Review queue      6 Patients         11 Home sections
   //   2 Assign team       7 Billing
   //   3 Live monitor      8 Settings
-  //   4 Manage services
+  //   4 Manage services   9 Banners
   late final _tabs = <Widget>[
     OverviewTab(onNavigateTab: _navigate),
     ReviewQueueTab(onNavigateTab: _navigate),
@@ -55,6 +59,9 @@ class _AdminOverviewScreenState extends ConsumerState<AdminOverviewScreen> {
     const PatientsTab(),
     const BillingTab(),
     const SettingsTab(),
+    const AdminBannerManagementPage(),
+    const AdminBookingReviewPage(),
+    const AdminHomeSectionsPage(),
   ];
 
   void _navigate(int idx) => setState(() => _selectedIndex = idx);
@@ -123,6 +130,7 @@ class _AdminSidebar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final counts = ref.watch(requestCountsProvider);
+    final bookingReviewCount = ref.watch(bookingReviewCountProvider);
     final kpiAsync = ref.watch(dashboardTelemetryProvider);
     final user = ref.watch(currentUserProvider);
     final activeServicesCount = kpiAsync.maybeWhen(
@@ -164,7 +172,7 @@ class _AdminSidebar extends ConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Medi-Treat', style: MtTextStyles.h3),
+                            Text('Taafi', style: MtTextStyles.h3),
                             Text(
                               'OPS CONSOLE',
                               style: MtTextStyles.labelSm.copyWith(
@@ -203,6 +211,16 @@ class _AdminSidebar extends ConsumerWidget {
                   selected: selectedIndex == 1,
                   collapsed: collapsed,
                   onTap: () => onDestinationSelected(1),
+                ),
+                _SidebarItem(
+                  icon: Icons.request_quote_outlined,
+                  label: 'Booking review',
+                  badgeCount: bookingReviewCount == 0
+                      ? null
+                      : bookingReviewCount,
+                  selected: selectedIndex == 10,
+                  collapsed: collapsed,
+                  onTap: () => onDestinationSelected(10),
                 ),
                 _SidebarItem(
                   icon: Icons.people_outline,
@@ -249,6 +267,20 @@ class _AdminSidebar extends ConsumerWidget {
                   selected: selectedIndex == 7,
                   collapsed: collapsed,
                   onTap: () => onDestinationSelected(7),
+                ),
+                _SidebarItem(
+                  icon: Icons.view_carousel_rounded,
+                  label: 'Banners',
+                  selected: selectedIndex == 9,
+                  collapsed: collapsed,
+                  onTap: () => onDestinationSelected(9),
+                ),
+                _SidebarItem(
+                  icon: Icons.dashboard_customize_outlined,
+                  label: 'Home sections',
+                  selected: selectedIndex == 11,
+                  collapsed: collapsed,
+                  onTap: () => onDestinationSelected(11),
                 ),
                 _SidebarItem(
                   icon: Icons.settings_outlined,
@@ -627,6 +659,12 @@ class _AdminTopBarState extends ConsumerState<_AdminTopBar> {
         return 'Billing';
       case 8:
         return 'Settings';
+      case 9:
+        return 'Promo banners';
+      case 10:
+        return 'Booking review';
+      case 11:
+        return 'Home sections';
       default:
         return 'Dashboard';
     }
@@ -656,28 +694,17 @@ class _AdminTopBarState extends ConsumerState<_AdminTopBar> {
                 constraints: const BoxConstraints(maxWidth: 320),
                 child: SizedBox(
                   height: 40,
-                  child: TextField(
+                  child: MtSearchField(
+                    dense: true,
                     controller: _searchController,
-              onSubmitted: (val) {
-                if (val.isEmpty) return;
-                ref.read(requestFilterProvider.notifier).state = ref
-                    .read(requestFilterProvider)
-                    .copyWith(searchQuery: val);
-                widget.onNavigateTab(1);
-              },
-              decoration: InputDecoration(
-                hintText: 'Search patients, doctors, requests...',
-                prefixIcon: const Icon(Icons.search,
-                    size: 18, color: MtColors.ink3),
-                contentPadding: EdgeInsets.zero,
-                filled: true,
-                fillColor: MtColors.bg,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-                    style: MtTextStyles.bodyMd,
+                    hintText: 'Search patients, doctors, requests...',
+                    onSubmitted: (val) {
+                      if (val.isEmpty) return;
+                      ref.read(requestFilterProvider.notifier).state = ref
+                          .read(requestFilterProvider)
+                          .copyWith(searchQuery: val);
+                      widget.onNavigateTab(1);
+                    },
                   ),
                 ),
               ),

@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/audio/notification_sound_service.dart';
 import '../../../core/network/socket_manager.dart';
 import '../../auth/auth_provider.dart';
 import '../models/notification_item.dart';
@@ -66,31 +66,6 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
   StreamSubscription<Map<String, dynamic>>? _notifSub;
   bool _disposed = false;
 
-  // Single shared `AudioPlayer` per notifier — re-using one instance
-  // keeps the platform decoder hot so the chime triggers in low-latency
-  // mode within the same frame as the socket push. `releaseMode: stop`
-  // means consecutive notifications interrupt the previous play cleanly
-  // (the chime is short; a tail isn't worth queueing).
-  final AudioPlayer _chimePlayer = AudioPlayer()
-    ..setReleaseMode(ReleaseMode.stop);
-
-  Future<void> _playChime() async {
-    try {
-      await _chimePlayer.play(
-        AssetSource('sounds/notification_chime.wav'),
-        mode: PlayerMode.lowLatency,
-      );
-    } catch (e) {
-      // Missing asset on dev rigs or a transient platform-channel
-      // error must not crash the socket listener — the notification
-      // itself has already landed in state by this point.
-      assert(() {
-        debugPrint('[notifications] chime failed: $e');
-        return true;
-      }());
-    }
-  }
-
   Future<void> _bootstrap() async {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
@@ -104,6 +79,16 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
 
   /// Pulls the latest inbox from the server.
   Future<void> refresh() async {
+    // No session yet (cold-start hydration window, or signed out): skip the
+    // network call entirely so we never fire an unauthenticated request that
+    // the server would 401. This notifier is keyed on `currentUserProvider`,
+    // so Riverpod rebuilds it with a real account id the moment hydration
+    // lands, and that rebuild fetches for real.
+    if (accountId.isEmpty) {
+      if (_disposed) return;
+      state = state.copyWith(isLoading: false, clearError: true);
+      return;
+    }
     final client = ref.read(dioClientProvider);
     final body = await client.getNotifications(accountId: accountId);
     if (_disposed) return;
@@ -162,7 +147,7 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
         // so we additionally gate on `isRead == false`.
         if (isBrandNew && !item.isRead) {
           // ignore: unawaited_futures
-          _playChime();
+          ref.read(notificationSoundProvider).playBubble();
         }
       } catch (e) {
         assert(() {
@@ -232,10 +217,6 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
     // ignore: unawaited_futures
     _notifSub?.cancel();
     _notifSub = null;
-    // Release the platform audio decoder. `dispose()` returns a Future;
-    // we fire-and-forget because Riverpod's dispose is sync.
-    // ignore: unawaited_futures
-    _chimePlayer.dispose();
     super.dispose();
   }
 }

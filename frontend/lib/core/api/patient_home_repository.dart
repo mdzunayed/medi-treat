@@ -96,6 +96,13 @@ class PatientHomeFeedController extends AsyncNotifier<PatientHomeFeed> {
     if (ar == null || br == null) return false;
     if (ar.id != br.id) return false;
     if (ar.status != br.status) return false;
+    // The two-phase booking states (awaiting_deposit,
+    // deposit_paid_admin_reviewing, amount_assigned_awaiting_final_payment)
+    // all collapse into the coarse `pendingReview` enum, so also diff the
+    // raw wire status + priced amount — otherwise "admin set the invoice"
+    // wouldn't wake the Under Review tab between polls.
+    if (ar.rawStatus != br.rawStatus) return false;
+    if (ar.finalServiceFee != br.finalServiceFee) return false;
     if (ar.providerName != br.providerName) return false;
     return true;
   }

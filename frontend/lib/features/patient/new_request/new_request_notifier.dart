@@ -7,7 +7,6 @@ import '../../../core/models/service_catalog_item.dart';
 import '../../admin/admin_providers.dart';
 import '../../auth/auth_provider.dart';
 import '../../doctor/doctor_providers.dart';
-import '../booking_prefill_provider.dart';
 import 'new_request_state.dart';
 
 /// Validation outcome — either `null` for "all clear" or a localized message
@@ -19,23 +18,22 @@ typedef ValidationResult = String?;
 /// state two days later.
 class NewRequestNotifier extends AutoDisposeNotifier<NewRequestState> {
   @override
-  NewRequestState build() {
-    final prefill = ref.read(servicePrefillProvider);
-    var initial = NewRequestState.initial();
-    if (prefill != null) {
-      initial = initial.copyWith(
-        selectedService: prefill,
-        notes: _buildPrefillNotes(prefill),
-      );
-      // Clear the prefill so a future visit doesn't accidentally re-apply it.
-      Future.microtask(
-        () => ref.read(servicePrefillProvider.notifier).state = null,
-      );
-    }
-    return initial;
-  }
+  NewRequestState build() => NewRequestState.initial();
 
   // ------------------------------------------------------------------ inputs
+
+  /// Pre-select a service chosen elsewhere (home card, catalog, "book again")
+  /// and seed the notes with its title/description. Imperative on purpose:
+  /// the notifier stays alive while the New Request tab sits in the shell's
+  /// IndexedStack, so a provider-read-in-build prefill would only ever apply
+  /// once at startup.
+  void applyServicePrefill(ServiceCatalogItem service) {
+    state = state.copyWith(
+      selectedService: service,
+      notes: _buildPrefillNotes(service),
+      validationError: null,
+    );
+  }
 
   void selectService(ServiceCatalogItem service) {
     state = state.copyWith(

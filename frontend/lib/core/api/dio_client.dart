@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../storage/app_prefs.dart';
 import '../models/admin_chart_data.dart';
 import '../models/admin_models.dart';
 import '../models/appointment.dart';
@@ -32,14 +34,16 @@ import '../models/provider_update_otp_dispatch.dart';
 import '../models/user.dart';
 
 class DioClient {
-  // Live backend base URL. Defaults to the local Node/Express API. Override
-  // per environment without code edits:
-  //   web / desktop:    (default) http://localhost:4000
-  //   Android emulator: --dart-define=API_BASE_URL=http://10.0.2.2:4000
-  //   staging/prod:     --dart-define=API_BASE_URL=https://api.meditreat.app
+  // Live backend base URL. Defaults to the local Node/Express API on :5000 so a
+  // plain `flutter run` works against a locally-running backend. Override per
+  // environment without code edits:
+  //   web / desktop:    (default) http://localhost:5000
+  //   Android emulator: --dart-define=API_BASE_URL=http://10.0.2.2:5000
+  //   staging/prod:     --dart-define=API_BASE_URL=https://medi-treat-backend-api.onrender.com
+  //                     (REQUIRED for real builds — the default is local-only)
   static const String _baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://medi-treat-backend-api.onrender.com',
+    defaultValue: 'http://localhost:5000',
   );
   static const String _tokenKey = 'auth_token';
   static const String _refreshTokenKey = 'refresh_token';
@@ -56,7 +60,7 @@ class DioClient {
   //
   // Default `false` means a plain `flutter run` shows live data — no dummy
   // rows, no per-launch flag ritual. Requires the backend at
-  // [_baseUrl] (default http://localhost:4000) + MongoDB to be running.
+  // [_baseUrl] (default http://localhost:5000) + MongoDB to be running.
   static const bool _useMockMode = bool.fromEnvironment(
     'USE_MOCK',
     defaultValue: false,
@@ -64,9 +68,13 @@ class DioClient {
 
   late final Dio _dio;
   SharedPreferences? _prefs;
-  String? _currentToken;
 
-  DioClient() {
+  // Provider ref, so the request interceptor can read the atomic [tokenProvider]
+  // and the write methods can push the live token into it. Nullable to keep
+  // non-Riverpod construction (tests / tooling) compiling.
+  final Ref? _ref;
+
+  DioClient([this._ref]) {
     _dio = Dio(
       BaseOptions(
         baseUrl: _baseUrl,
@@ -76,28 +84,64 @@ class DioClient {
       ),
     );
 
-    // Add interceptor for JWT
+    // Unified auth injection — the single place every outgoing request gets
+    // its bearer. The token is read SYNCHRONOUSLY, on-demand, from the atomic
+    // [tokenProvider] (a graph leaf that reads SharedPreferences and depends on
+    // nothing else), NOT from the auth-state notifier. Reading `authTokenProvider`
+    // here created a `dioClientProvider → authTokenProvider → dioClientProvider`
+    // cycle that threw `CircularDependencyError` at startup; `tokenProvider` can
+    // never point back. SharedPreferences is preloaded in main(), so the token
+    // is available on the very first request — no async gap, no cold-start race.
     _dio.interceptors.add(
       InterceptorsWrapper(
-        onRequest: (options, handler) async {
-          if (_currentToken != null) {
-            options.headers['Authorization'] = 'Bearer $_currentToken';
+        onRequest: (options, handler) {
+          final token = _ref?.read(tokenProvider);
+          if (token != null && token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
           }
           return handler.next(options);
         },
         onError: (error, handler) async {
-          if (error.response?.statusCode == 401) {
-            // Try to refresh token
+          // Refresh-and-retry applies ONLY to expired sessions on protected
+          // endpoints. A 401 from the auth surface itself (/auth/login,
+          // /auth/verify-otp, …) means BAD CREDENTIALS — refreshing and
+          // retrying there swallowed the failure entirely: the stub
+          // /auth/refresh "succeeded", the retry was re-issued as a GET
+          // (method was dropped), and the resulting throw inside this
+          // callback left the handler unresolved — the login Future never
+          // completed and the UI froze silently. Let auth 401s propagate so
+          // _handleError can surface the backend's message.
+          final status = error.response?.statusCode;
+          final isAuthEndpoint =
+              error.requestOptions.path.contains('/auth/');
+          final alreadyRetried =
+              error.requestOptions.extra['authRetried'] == true;
+          if (status == 401 && !isAuthEndpoint && !alreadyRetried) {
             final refreshed = await _refreshToken();
             if (refreshed) {
-              return handler.resolve(
-                await _dio.request(
-                  error.requestOptions.path,
-                  data: error.requestOptions.data,
-                  queryParameters: error.requestOptions.queryParameters,
-                ),
-              );
+              try {
+                // fetch() re-runs the full pipeline (method + headers
+                // preserved; onRequest injects the fresh bearer). The
+                // extra flag caps this at one retry per request.
+                error.requestOptions.extra['authRetried'] = true;
+                return handler.resolve(
+                  await _dio.fetch(error.requestOptions),
+                );
+              } on DioException catch (retryError) {
+                // Retry failed too — reject with the newer error so the
+                // caller's Future always completes. (If the retry itself
+                // 401'd, its own pass through this interceptor — with
+                // authRetried already set — flushed the session.)
+                return handler.next(retryError);
+              }
             }
+            // Refresh failed: the session is unrecoverable. Flush it so
+            // the router bounces to /login instead of leaving the app
+            // "signed in" while every protected request keeps 401ing.
+            await _flushExpiredSession();
+          } else if (status == 401 && !isAuthEndpoint && alreadyRetried) {
+            // Second 401 on the already-retried request — unrecoverable.
+            await _flushExpiredSession();
           }
           return handler.next(error);
         },
@@ -105,11 +149,16 @@ class DioClient {
     );
   }
 
+  /// The configured, authenticated [Dio] instance (JWT injection + 401
+  /// refresh-and-retry interceptor). Exposed so repositories that own their
+  /// own request/caching logic — e.g. the promo-banner repository — can reuse
+  /// the auth pipeline instead of building a second, token-less client.
+  Dio get authedDio => _dio;
+
   Future<void> _ensurePrefsInitialized() async {
-    if (_prefs == null) {
-      _prefs = await SharedPreferences.getInstance();
-      _currentToken = _prefs?.getString(_tokenKey);
-    }
+    // Same cached instance held by [sharedPreferencesProvider] (preloaded in
+    // main()); used here for the refresh-token + user keys DioClient owns.
+    _prefs ??= await SharedPreferences.getInstance();
   }
 
   Future<void> init() async {
@@ -120,7 +169,9 @@ class DioClient {
     await _ensurePrefsInitialized();
     await _prefs?.setString(_tokenKey, token);
     await _prefs?.setString(_refreshTokenKey, refreshToken);
-    _currentToken = token;
+    // Push the live token so the interceptor's [tokenProvider] read reflects a
+    // fresh login on the very next request (persisted above for cold starts).
+    _ref?.read(tokenProvider.notifier).state = token;
   }
 
   /// Persists the freshly-signed-in [User] alongside the token so a cold
@@ -144,7 +195,9 @@ class DioClient {
     }
     try {
       final user = User.fromJson(jsonDecode(userRaw) as Map<String, dynamic>);
-      _currentToken = token;
+      // [tokenProvider] already initialised from the same `auth_token` key at
+      // boot, so the interceptor is already carrying this token — nothing to
+      // push here.
       return AuthToken(
         token: token,
         refreshToken: refresh ?? '',
@@ -176,7 +229,14 @@ class DioClient {
       if (response.statusCode == 200) {
         final newToken = response.data['token'];
         await _prefs?.setString(_tokenKey, newToken);
-        _currentToken = newToken;
+        // Persist the rotated refresh token too — the backend re-issues
+        // one on every refresh, and holding on to the old (consumed) one
+        // would strand the session at the next expiry.
+        final newRefresh = response.data['refreshToken'];
+        if (newRefresh is String && newRefresh.isNotEmpty) {
+          await _prefs?.setString(_refreshTokenKey, newRefresh);
+        }
+        _ref?.read(tokenProvider.notifier).state = newToken;
         return true;
       }
       return false;
@@ -190,7 +250,25 @@ class DioClient {
     await _prefs?.remove(_tokenKey);
     await _prefs?.remove(_refreshTokenKey);
     await _prefs?.remove(_userKey);
-    _currentToken = null;
+    _ref?.read(tokenProvider.notifier).state = null;
+  }
+
+  /// Session-expiry flush, invoked by the 401 interceptor when the refresh
+  /// (or the post-refresh retry) fails. Clears the persisted session and
+  /// bumps the [sessionExpiredProvider] leaf; authTokenProvider listens for
+  /// that bump and nulls its state, which the router redirect turns into an
+  /// automatic bounce to /login. DioClient can't touch authTokenProvider
+  /// directly — that's the startup dependency cycle the tokenProvider leaf
+  /// exists to avoid. Best-effort: a flush failure must never mask the
+  /// original 401 flowing back to the caller.
+  Future<void> _flushExpiredSession() async {
+    try {
+      await clearTokens();
+      final notifier = _ref?.read(sessionExpiredProvider.notifier);
+      if (notifier != null) notifier.state++;
+    } catch (_) {
+      // Swallow: the caller still receives the original DioException.
+    }
   }
 
   // Auth endpoints
@@ -842,7 +920,7 @@ class DioClient {
       return User(
         id: 'doctor_001',
         name: 'Dr. Nafisa Rahman',
-        email: 'doctor@meditreat.app',
+        email: 'doctor@taafi.app',
         phone: '+880 1700 000001',
         role: UserRole.doctor,
         avatar: 'NR',
@@ -854,7 +932,7 @@ class DioClient {
       return User(
         id: 'admin_001',
         name: 'Admin User',
-        email: 'admin@meditreat.app',
+        email: 'admin@taafi.app',
         phone: '+880 1700 000002',
         role: UserRole.admin,
         avatar: 'AU',
@@ -864,7 +942,7 @@ class DioClient {
       return User(
         id: 'patient_001',
         name: 'Rumi Ahmed',
-        email: 'patient@meditreat.app',
+        email: 'patient@taafi.app',
         phone: '+880 1700 000003',
         role: UserRole.patient,
         avatar: 'RA',
@@ -1119,6 +1197,154 @@ class DioClient {
         '/patient/requests/$requestId/cancel',
         data: {'reason': ?reason},
       );
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Two-phase booking confirmation payments (SSLCommerz + simulated
+  // fallback). `init*` opens a gateway session (returns `{simulated,
+  // gatewayUrl, tranId, amount}`); `confirm*` settles a payment and
+  // returns the updated care-request row.
+  // ------------------------------------------------------------------
+
+  Future<Map<String, dynamic>> initBookingDeposit(String requestId) async {
+    if (_useMockMode) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      return {
+        'simulated': true,
+        'amount': 100,
+        'tranId': 'MOCK-DEP-${DateTime.now().millisecondsSinceEpoch}',
+        'gatewayUrl': null,
+      };
+    }
+    try {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/patient/requests/$requestId/deposit/init',
+      );
+      return res.data ?? const <String, dynamic>{};
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> confirmBookingDeposit(
+    String requestId, {
+    String? tranId,
+    String? valId,
+  }) async {
+    if (_useMockMode) {
+      await Future.delayed(const Duration(milliseconds: 400));
+      return {'id': requestId, 'status': 'deposit_paid_admin_reviewing'};
+    }
+    try {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/patient/requests/$requestId/deposit/confirm',
+        data: {'tranId': tranId, 'valId': valId},
+      );
+      return res.data ?? const <String, dynamic>{};
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> initBookingBalance(String requestId) async {
+    if (_useMockMode) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      return {
+        'simulated': true,
+        'amount': 0,
+        'tranId': 'MOCK-BAL-${DateTime.now().millisecondsSinceEpoch}',
+        'gatewayUrl': null,
+      };
+    }
+    try {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/patient/requests/$requestId/balance/init',
+      );
+      return res.data ?? const <String, dynamic>{};
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> confirmBookingBalance(
+    String requestId, {
+    String? tranId,
+    String? valId,
+  }) async {
+    if (_useMockMode) {
+      await Future.delayed(const Duration(milliseconds: 400));
+      return {'id': requestId, 'status': 'approved'};
+    }
+    try {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/patient/requests/$requestId/balance/confirm',
+        data: {'tranId': tranId, 'valId': valId},
+      );
+      return res.data ?? const <String, dynamic>{};
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Admin Phase-2 pricing gateway. Assigns the base service fee (and an
+  /// optional discount / call note) to a deposit-paid booking, flipping it
+  /// to `amount_assigned_awaiting_final_payment` and notifying the patient.
+  Future<Map<String, dynamic>> adminSetBookingPrice(
+    String requestId, {
+    required double finalServiceFee,
+    double adjustedDiscount = 0,
+    String? adminNote,
+  }) async {
+    if (_useMockMode) {
+      await Future.delayed(const Duration(milliseconds: 400));
+      return {
+        'id': requestId,
+        'status': 'amount_assigned_awaiting_final_payment',
+        'final_price': finalServiceFee,
+        'adjusted_discount': adjustedDiscount,
+      };
+    }
+    try {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/admin/requests/$requestId/set-price',
+        data: {
+          'final_service_fee': finalServiceFee,
+          'adjusted_discount': adjustedDiscount,
+          'admin_note': ?adminNote,
+        },
+      );
+      return res.data ?? const <String, dynamic>{};
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  // Administrative cancellation. Admin-only (guarded server-side by
+  // requireRole('admin')); the dedicated endpoint also releases the assigned
+  // provider/team and notifies the patient + providers — which the generic
+  // bulk-status path does not — so cancels must route through here.
+  Future<Map<String, dynamic>> adminCancelBooking(
+    String requestId, {
+    String? reason,
+  }) async {
+    if (_useMockMode) {
+      await Future.delayed(const Duration(milliseconds: 400));
+      return {
+        'id': requestId,
+        'status': 'cancelled',
+      };
+    }
+    try {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/admin/requests/$requestId/cancel',
+        data: {
+          'reason': ?reason,
+        },
+      );
+      return res.data ?? const <String, dynamic>{};
     } on DioException catch (e) {
       throw _handleError(e);
     }
@@ -1584,7 +1810,7 @@ class DioClient {
       return PatientProfile(
         id: accountId,
         fullName: 'Rumi Ahmed',
-        email: 'patient@meditreat.app',
+        email: 'patient@taafi.app',
         phone: '+8801710000001',
         status: 'active',
         createdAt: DateTime.now().subtract(const Duration(days: 120)),
@@ -1616,7 +1842,7 @@ class DioClient {
       return PatientProfile(
         id: accountId,
         fullName: (updates['full_name'] ?? 'Rumi Ahmed').toString(),
-        email: (updates['email'] ?? 'patient@meditreat.app').toString(),
+        email: (updates['email'] ?? 'patient@taafi.app').toString(),
         phone: (updates['phone'] ?? '+8801710000001').toString(),
       );
     }
@@ -1638,7 +1864,7 @@ class DioClient {
       return DoctorProfile(
         id: doctorId,
         fullName: 'Dr. Nafisa Rahman',
-        email: 'doctor@meditreat.app',
+        email: 'doctor@taafi.app',
         phone: '+8801710000002',
         specialization: 'Internal medicine',
         specialty: 'Family medicine',
@@ -2757,7 +2983,7 @@ class DioClient {
         User(
           id: 'patient_001',
           name: 'Rumi Ahmed',
-          email: 'patient@meditreat.app',
+          email: 'patient@taafi.app',
           phone: '+8801710000001',
           role: UserRole.patient,
         ),
@@ -3223,7 +3449,9 @@ class DioClient {
     }
 
     // 2. Status-code based fallbacks for responses with no body.
-    if (status == 401) return 'Invalid phone number or password.';
+    if (status == 401) {
+      return 'Incorrect mobile number or password. Please try again.';
+    }
     if (status == 403) return 'Account is inactive or not allowed.';
     if (status == 404) return 'Server endpoint not found (${error.requestOptions.path}).';
     if (status != null && status >= 500) {

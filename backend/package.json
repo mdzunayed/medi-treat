@@ -1,8 +1,8 @@
 {
-  "name": "medi-treat-api",
+  "name": "taafi-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Medi-Treat REST API (Express + Mongoose + Multer)",
+  "description": "Taafi REST API (Express + Mongoose + Multer)",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {

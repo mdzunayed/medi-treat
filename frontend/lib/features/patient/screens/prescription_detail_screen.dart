@@ -249,7 +249,7 @@ class _PrescriptionDetailScreenState
                             style: pw.TextStyle(fontSize: 9, color: teal)),
                     ],
                   ),
-                  pw.Text('Medi-Treat',
+                  pw.Text('Taafi',
                       style: pw.TextStyle(
                           fontSize: 14,
                           fontWeight: pw.FontWeight.bold,

@@ -1,5 +1,5 @@
-name: medi_treat
-description: "A new Flutter project."
+name: taafi
+description: "Taafi — home healthcare at your doorstep."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -74,11 +74,10 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/icons/
-    - assets/images/
     - assets/data/
     - assets/sounds/
     - assets/logo/
+    - assets/audio/
 
   # Fonts commented out - using system fonts as fallback
   # To enable custom fonts:

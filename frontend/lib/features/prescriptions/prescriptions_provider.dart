@@ -61,6 +61,92 @@ final patientPrescriptionsProvider = AsyncNotifierProvider.autoDispose<
     PatientPrescriptionsNotifier,
     List<Prescription>>(PatientPrescriptionsNotifier.new);
 
+/// Backs the "Medications" tab's prescription hub: the patient's FULL
+/// script list (`GET /api/prescriptions/by-patient/:accountId`,
+/// newest-first, each row enriched with the issuing doctor's public
+/// profile block) — unlike the active-only timeline provider above,
+/// completed courses stay visible with a Completed badge. Carries the
+/// same optimistic dose-toggle write path so today's adherence chips
+/// on active cards stay trackable.
+class MedicationsHubNotifier
+    extends AutoDisposeAsyncNotifier<List<Prescription>> {
+  @override
+  Future<List<Prescription>> build() async {
+    final user = ref.watch(currentUserProvider);
+    if (user == null) return const [];
+    return ref.read(dioClientProvider).getPrescriptionsForPatient(user.id);
+  }
+
+  Future<void> refresh() async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      state = const AsyncData(<Prescription>[]);
+      return;
+    }
+    state = await AsyncValue.guard(
+      () => ref.read(dioClientProvider).getPrescriptionsForPatient(user.id),
+    );
+  }
+
+  /// Same write-through dose toggle as the timeline notifier, but the
+  /// reconciled row keeps this list's `doctor` block: the PATCH
+  /// response isn't doctor-enriched, so we graft the block we already
+  /// hold back onto the refreshed prescription.
+  Future<bool> toggleDose({
+    required String prescriptionId,
+    required String itemId,
+    required DoseSlot slot,
+    required String dayKey,
+    required bool taken,
+  }) async {
+    final current = state.valueOrNull;
+    if (current == null) return false;
+    try {
+      final refreshed = await ref.read(dioClientProvider).setDoseTaken(
+            prescriptionId: prescriptionId,
+            itemId: itemId,
+            slot: slot,
+            dayKey: dayKey,
+            taken: taken,
+          );
+      state = AsyncData([
+        for (final p in current)
+          if (p.id == prescriptionId)
+            Prescription(
+              id: refreshed.id,
+              appointmentId: refreshed.appointmentId,
+              patientAccountId: refreshed.patientAccountId,
+              doctorAccountId: refreshed.doctorAccountId,
+              doctorName: refreshed.doctorName,
+              diagnosis: refreshed.diagnosis,
+              issuedAt: refreshed.issuedAt,
+              items: refreshed.items,
+              doseLog: refreshed.doseLog,
+              doctor: refreshed.doctor ?? p.doctor,
+              doctorBmdc: refreshed.doctorBmdc.isNotEmpty
+                  ? refreshed.doctorBmdc
+                  : p.doctorBmdc,
+              doctorSpecialization: refreshed.doctorSpecialization.isNotEmpty
+                  ? refreshed.doctorSpecialization
+                  : p.doctorSpecialization,
+              doctorVerified: refreshed.doctorVerified || p.doctorVerified,
+              symptoms:
+                  refreshed.symptoms.isNotEmpty ? refreshed.symptoms : p.symptoms,
+            )
+          else
+            p,
+      ]);
+      return true;
+    } catch (_) {
+      // Keep the previous state on failure — caller surfaces a snack.
+      return false;
+    }
+  }
+}
+
+final medicationsHubProvider = AsyncNotifierProvider.autoDispose<
+    MedicationsHubNotifier, List<Prescription>>(MedicationsHubNotifier.new);
+
 /// `GET /api/prescriptions/by-patient/:accountId` — the patient's full
 /// historical prescription vault (every script ever issued, newest-first),
 /// distinct from the active-only timeline above.

@@ -6,11 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/models/care_request_status.dart';
+import '../../../core/widgets/mt_search_field.dart';
 import '../../../core/models/doctor_dashboard.dart';
 import '../../../core/models/doctor_patient.dart';
 import '../../../core/models/doctor_stats.dart';
 import '../../../core/models/patient_history_item.dart';
 import '../../../core/models/prescription.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
@@ -371,8 +373,8 @@ class _DeploymentCardState extends ConsumerState<_DeploymentCard> {
               InitialsAvatar(
                 name: _appt.patientName,
                 size: 48,
-                backgroundColor: const Color(0xFFFEF3C7),
-                textColor: const Color(0xFF92400E),
+                backgroundColor: context.appColors.warningBg,
+                textColor: context.appColors.warning,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -504,32 +506,10 @@ class _PatientRecordsTabState extends ConsumerState<PatientRecordsTab> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: TextField(
+          child: MtSearchField(
             controller: _searchCtrl,
             onChanged: _onSearchChanged,
-            style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink),
-            decoration: InputDecoration(
-              hintText: 'Search patients by name',
-              hintStyle: MtTextStyles.bodyMd.copyWith(color: MtColors.ink3),
-              prefixIcon: const Icon(Icons.search, color: MtColors.ink3),
-              filled: true,
-              fillColor: MtColors.surface,
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: MtColors.line),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: MtColors.line),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: MtColors.brand, width: 1.4),
-              ),
-            ),
+            hintText: 'Search patients by name',
           ),
         ),
         Expanded(
@@ -862,8 +842,8 @@ class PerformanceTab extends ConsumerWidget {
             caption: stats.reviewCount == 1
                 ? 'from 1 review'
                 : 'from ${stats.reviewCount} reviews',
-            trailing: const Icon(Icons.star_rounded,
-                color: Color(0xFFF59E0B), size: 28),
+            trailing: Icon(Icons.star_rounded,
+                color: context.appColors.warning, size: 28),
           ),
         ],
       ),
@@ -996,15 +976,16 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     final (label, fg, bg) = switch (status) {
-      CareRequestStatus.assigned => ('ASSIGNED', MtColors.brand700, MtColors.brandSoft),
+      CareRequestStatus.assigned =>
+        ('ASSIGNED', c.accent, c.accent.withValues(alpha: 0.15)),
       CareRequestStatus.enroute ||
-      CareRequestStatus.onTheWay =>
-        ('ON THE WAY', const Color(0xFF1D4ED8), const Color(0xFFEFF6FF)),
-      CareRequestStatus.arrived => ('ARRIVED', MtColors.brand, MtColors.brandSoft),
-      CareRequestStatus.inService =>
-        ('IN SERVICE', const Color(0xFF6B21A8), const Color(0xFFF3E8FF)),
-      _ => (status.toUpperCase(), MtColors.ink3, MtColors.bg),
+      CareRequestStatus.onTheWay => ('ON THE WAY', c.info, c.infoBg),
+      CareRequestStatus.arrived =>
+        ('ARRIVED', c.accent, c.accent.withValues(alpha: 0.15)),
+      CareRequestStatus.inService => ('IN SERVICE', c.brand, c.glow),
+      _ => (status.toUpperCase(), c.muted, c.surfaceHi),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

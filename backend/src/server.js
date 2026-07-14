@@ -9,6 +9,9 @@ const path = require('path');
 const { Server: SocketIOServer } = require('socket.io');
 
 const servicesRouter = require('./routes/services');
+const promoBannersRouter = require('./routes/promoBanners');
+const homeSectionsRouter = require('./routes/homeSections');
+const appOpenAdRouter = require('./routes/appOpenAd');
 const authRouter = require('./routes/auth');
 const patientRouter = require('./routes/patient');
 const adminRouter = require('./routes/admin');
@@ -35,6 +38,10 @@ const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+// SSLCommerz posts its success/fail/cancel/IPN callbacks as
+// application/x-www-form-urlencoded — parse them so the two-phase booking
+// payment webhooks (routes/patient.js) can read `val_id` / `tran_id`.
+app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
@@ -42,6 +49,18 @@ app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 app.get('/health', (_req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
 app.use('/api/services', servicesRouter);
+// Promo marketing banners for the patient Home slider. Public GET (the
+// client reads active banners); create/update/delete/reorder are
+// admin-gated inside the router via requireRole('admin').
+app.use('/api/promo-banners', promoBannersRouter);
+// Server-driven dynamic home sections rendered below Banners + Care
+// Services. Public GET (the client reads active sections); all writes are
+// admin-gated inside the router via requireRole('admin').
+app.use('/api/home-sections', homeSectionsRouter);
+// Full-screen app-open interstitial ad. Public GET (the patient client
+// checks for an active campaign at launch); upsert/delete are admin-gated
+// inside the router via requireRole('admin').
+app.use('/api/app-open-ad', appOpenAdRouter);
 // Auth is exposed under both prefixes:
 //   • `/auth/*`     — legacy. The existing DioClient + legacy LoginScreen.
 //   • `/api/auth/*` — canonical (matches the new spec).
@@ -99,7 +118,7 @@ const PORT = Number(process.env.PORT || 4000);
 // Matches the database the team actually populates via Compass / Docker
 // (collections: accounts, care_requests, providers). Override with the
 // MONGO_URI env var for staging / prod.
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/medi_treat';
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/taafi';
 
 mongoose
   .connect(MONGO_URI)
@@ -393,6 +412,17 @@ mongoose
     };
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+    // Last-resort safety nets. Every route handler carries its own
+    // try/catch, so these should never fire in practice — but a rejection
+    // that escapes anyway must not silently kill (or zombify) the process.
+    process.on('unhandledRejection', (reason) => {
+      console.error('[api] unhandled promise rejection:', reason);
+    });
+    process.on('uncaughtException', (err) => {
+      console.error('[api] uncaught exception, exiting:', err);
+      process.exit(1);
+    });
   })
   .catch((err) => {
     console.error('[mongo] connection error:', err.message);

@@ -9,6 +9,17 @@ class MtColors {
   static const Color brand600 = Color(0xFFC2410C);
   static const Color brand700 = Color(0xFF9A3412);
 
+  // Active brand identity (violet primary + reserved orange accent).
+  // These drive the light/dark ThemeData in mt_theme.dart. The legacy Care
+  // Orange tokens above are retained for screens not yet migrated to the
+  // theme-aware AppColors extension (see the follow-up sweep).
+  static const Color violet = Color(0xFF673AB7); // brand primary (light)
+  static const Color violetBright = Color(0xFF7C4DFF); // brand primary (dark)
+  static const Color violet600 = Color(0xFF5E35B1);
+  static const Color violet700 = Color(0xFF512DA8);
+  static const Color accentLight = Color(0xFFE05300); // orange-rust on white
+  static const Color accentDark = Color(0xFFF36512); // vibrant sunset orange
+
   // Neutral/Surface colors
   static const Color ink = Color(0xFF0F172A);
   static const Color ink2 = Color(0xFF475569);

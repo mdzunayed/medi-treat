@@ -1,11 +1,11 @@
 {
-    "name": "Medi-Treat",
-    "short_name": "Medi-Treat",
+    "name": "Taafi - Home Healthcare",
+    "short_name": "Taafi",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#EA580C",
     "theme_color": "#EA580C",
-    "description": "Post-surgery home care across Patient, Doctor, and Admin roles.",
+    "description": "জ্যাম আর সিরিয়ালকে বিদায়, চিকিৎসা এখন আপনার দরজায়",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

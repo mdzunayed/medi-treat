@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../auth/auth_provider.dart';
+import '../../navigation/presentation/widgets/custom_floating_navbar.dart';
 import '../../notifications/widgets/notification_bell.dart';
 import '../../provider/presentation/nurse_dashboard_tabs.dart';
 import '../../provider/providers/nurse_workflow_provider.dart';
@@ -12,14 +14,14 @@ import 'controllers/nurse_nav_controller.dart';
 import 'nurse_profile_screen.dart';
 
 // ── Nurse-module identity palette ───────────────────────────────────────────
-// Aligned with the patient app's burnt-orange brand so every role shares one
-// signature. Dark-slate foundations (rail / floating bar / wordmark) stay dark
-// for contrast; `_kMint` is the primary accent (now orange). `_kEmerald`
-// remains green — it is the semantic "on-duty / online" status colour.
-const Color _kIndigo = MtColors.ink; // dark-slate foundation
-const Color _kIndigoSoft = Color(0xFF1E293B); // slate-800
-const Color _kMint = MtColors.brand; // primary accent → burnt orange
-const Color _kEmerald = Color(0xFF059669); // online/on-duty status (green)
+// Dark chrome reserved for the ALWAYS-DARK surfaces (rail / wordmark tile /
+// flash-banner gradient) which keep the same look in both themes — deliberate
+// design intent, like the floating navbar pill. Every adaptive surface reads
+// `context.appColors` tokens instead; on-duty/online semantics use
+// `appColors.positive`.
+const Color _kIndigo = MtColors.ink; // dark-slate foundation (chrome only)
+const Color _kIndigoSoft = Color(0xFF1E293B); // slate-800 (chrome only)
+const Color _kMint = MtColors.brand; // accent on dark chrome → burnt orange
 
 /// Width at/above which the shell promotes the mobile floating bottom bar
 /// into a left-anchored [NavigationRail] (tablet / desktop-web layouts).
@@ -61,7 +63,7 @@ class NurseMainShell extends ConsumerWidget {
     final content = _ContentArea(index: index, incoming: incoming);
 
     return Scaffold(
-      backgroundColor: MtColors.bg,
+      backgroundColor: context.appColors.canvas,
       body: SafeArea(
         bottom: false,
         child: wide
@@ -72,7 +74,8 @@ class NurseMainShell extends ConsumerWidget {
                     incoming: incoming,
                     onSelect: nav.select,
                   ),
-                  const VerticalDivider(width: 1, color: MtColors.line),
+                  VerticalDivider(
+                      width: 1, color: context.appColors.cardBorder),
                   Expanded(child: content),
                 ],
               )
@@ -80,10 +83,17 @@ class NurseMainShell extends ConsumerWidget {
       ),
       bottomNavigationBar: wide
           ? null
-          : _NurseBottomBar(
-              index: index,
-              incoming: incoming,
-              onSelect: nav.select,
+          : CustomFloatingNavBar(
+              currentIndex: index,
+              onTap: nav.select,
+              items: [
+                for (var i = 0; i < _kDestinations.length; i++)
+                  FloatingNavItem(
+                    icon: _kDestinations[i].icon,
+                    label: _kDestinations[i].label,
+                    badgeCount: i == NurseTab.dispatches ? incoming : 0,
+                  ),
+              ],
             ),
     );
   }
@@ -186,10 +196,11 @@ class _NurseHeader extends ConsumerWidget {
               children: [
                 Text('NURSE OPERATIONS',
                     style: MtTextStyles.labelSm.copyWith(
-                        color: MtColors.ink3, letterSpacing: 1.1)),
+                        color: context.appColors.muted, letterSpacing: 1.1)),
                 Text(
                   name,
-                  style: MtTextStyles.h3.copyWith(color: MtColors.ink),
+                  style:
+                      MtTextStyles.h3.copyWith(color: context.appColors.title),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -230,21 +241,22 @@ class _DutyToggleCard extends ConsumerWidget {
     final availability = ref.watch(nurseAvailabilityProvider);
     final online = availability.valueOrNull ?? false;
     final busy = availability.isLoading;
+    final c = context.appColors;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
       decoration: BoxDecoration(
-        color: online ? const Color(0xFFDCFCE7) : MtColors.surface,
+        color: online ? c.positiveBg : c.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: online ? _kEmerald : MtColors.line),
+        border: Border.all(color: online ? c.positive : c.cardBorder),
       ),
       child: Row(
         children: [
           Icon(
             online ? Icons.bolt_rounded : Icons.bolt_outlined,
             size: 20,
-            color: online ? _kEmerald : MtColors.ink3,
+            color: online ? c.positive : c.muted,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -253,15 +265,15 @@ class _DutyToggleCard extends ConsumerWidget {
                   ? 'On duty · discoverable for dispatches'
                   : 'Off duty · not receiving dispatches',
               style: MtTextStyles.labelMd.copyWith(
-                color: online ? _kEmerald : MtColors.ink3,
+                color: online ? c.positive : c.muted,
                 fontWeight: FontWeight.w700,
               ),
             ),
           ),
           Switch.adaptive(
             value: online,
-            activeThumbColor: _kEmerald,
-            activeTrackColor: _kEmerald.withValues(alpha: 0.4),
+            activeThumbColor: c.positive,
+            activeTrackColor: c.positive.withValues(alpha: 0.4),
             onChanged: busy
                 ? null
                 : (_) {
@@ -440,115 +452,9 @@ class _RailIcon extends StatelessWidget {
     return Badge(
       isLabelVisible: badge > 0,
       label: Text('$badge'),
-      backgroundColor: MtColors.rejected,
+      backgroundColor: context.appColors.danger,
       child: Icon(icon),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Mobile floating bottom bar
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _NurseBottomBar extends StatelessWidget {
-  final int index;
-  final int incoming;
-  final ValueChanged<int> onSelect;
-  const _NurseBottomBar({
-    required this.index,
-    required this.incoming,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(14, 0, 14, 10 + bottomInset),
-      child: Container(
-        height: 66,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [_kIndigo, _kIndigoSoft],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: _kIndigo.withValues(alpha: 0.32),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            for (var i = 0; i < _kDestinations.length; i++)
-              Expanded(
-                child: _BottomItem(
-                  dest: _kDestinations[i],
-                  selected: i == index,
-                  badge: i == NurseTab.dispatches ? incoming : 0,
-                  onTap: () => onSelect(i),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BottomItem extends StatelessWidget {
-  final _NavDest dest;
-  final bool selected;
-  final int badge;
-  final VoidCallback onTap;
-  const _BottomItem({
-    required this.dest,
-    required this.selected,
-    required this.badge,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? _kMint : Colors.white.withValues(alpha: 0.6);
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-        decoration: BoxDecoration(
-          color: selected ? _kMint.withValues(alpha: 0.16) : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Badge(
-              isLabelVisible: badge > 0,
-              label: Text('$badge'),
-              backgroundColor: MtColors.rejected,
-              child: Icon(dest.icon, color: color, size: 22),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              dest.label,
-              style: MtTextStyles.labelSm.copyWith(
-                color: color,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                fontSize: 10,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

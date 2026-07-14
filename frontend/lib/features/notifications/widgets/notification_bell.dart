@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
-import '../presentation/notification_hub_screen.dart';
+import '../presentation/notification_panel.dart';
 import '../providers/notification_provider.dart';
 
 /// Shared notification bell used by the patient, doctor, and admin
@@ -12,8 +12,9 @@ import '../providers/notification_provider.dart';
 /// corner. The badge is automatically hidden when `unreadCount == 0`,
 /// matching the spec.
 ///
-/// Tap opens the unified [NotificationHubScreen]. Embedding screens can
-/// override that by passing [onTap].
+/// Tap opens the glassmorphic [showNotificationPanel] overlay (whose "See
+/// all" forwards to the full-screen hub). Embedding screens can override that
+/// by passing [onTap].
 class NotificationBell extends ConsumerWidget {
   final VoidCallback? onTap;
 
@@ -34,9 +35,9 @@ class NotificationBell extends ConsumerWidget {
       onTap!();
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const NotificationHubScreen()),
-    );
+    // Default action across all role shells: the glassmorphic overlay panel.
+    // Its "See all" forwards to the full-screen NotificationHubScreen.
+    showNotificationPanel(context);
   }
 
   @override

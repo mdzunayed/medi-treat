@@ -145,7 +145,7 @@ async function sendHighPriorityPush(userId, title, body, data = {}) {
       android: {
         priority: 'high',
         notification: {
-          channelId: 'medi_treat_high_priority',
+          channelId: 'taafi_high_priority',
           sound: 'default',
           defaultSound: true,
           defaultVibrateTimings: true,

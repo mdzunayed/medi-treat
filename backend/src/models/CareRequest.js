@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { roundMoney } = require('../utils/money');
 
 // `care_requests` collection. Field names are snake_case to match the
 // Flutter snake_case_json parser layer exactly (no camelCase drift). The
@@ -34,6 +35,19 @@ const CareRequestSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        // --- Two-phase booking confirmation states -----------------------
+        // Phase 1: the patient has created the booking but has NOT yet paid
+        // the fixed ৳100 confirmation deposit. The slot is not "locked in"
+        // and admins do NOT see it in triage until the deposit clears.
+        'awaiting_deposit',
+        // Phase 1 complete: the ৳100 deposit was confirmed by the gateway.
+        // The booking is now live and sits in the admin's care-management
+        // review queue (call the client, assess severity, set the fee).
+        'deposit_paid_admin_reviewing',
+        // Phase 2: the admin set the final service fee. The patient now sees
+        // the dynamic invoice and must pay the outstanding balance before
+        // the request re-enters the provider dispatch pipeline (`approved`).
+        'amount_assigned_awaiting_final_payment',
         'submitted',
         'approved',
         'assigned',
@@ -53,8 +67,26 @@ const CareRequestSchema = new mongoose.Schema(
       default: 'submitted',
       index: true,
     },
+    // Reused as the "final service fee" the admin assigns after the manual
+    // phone review (spec: finalServiceFee). Set by both the two-phase
+    // set-price gateway and the legacy provider-dispatch assign route.
     final_price: { type: Number, default: null },
+    // Reused as the admin's onboarding-call summary (spec: adminNotes).
     admin_note: { type: String, default: null },
+
+    // --- Two-phase confirmation deposit & dynamic invoicing --------------
+    // Fixed ৳100 slot-confirmation deposit. `deposit_amount` is 0 until the
+    // gateway confirms, then locked to 100. The deposit is DEDUCTED from the
+    // final bill: outstanding = final_price - deposit_amount - adjusted_discount.
+    deposit_amount: { type: Number, default: 0 },
+    deposit_transaction_id: { type: String, default: null },
+    deposit_paid_at: { type: Date, default: null },
+    // Optional promotional adjustment / waiver applied by the admin at pricing.
+    adjusted_discount: { type: Number, default: 0 },
+    // Balance (outstanding) payment settlement, stamped when the patient
+    // clears the invoice and the request advances into the dispatch queue.
+    final_transaction_id: { type: String, default: null },
+    final_paid_at: { type: Date, default: null },
     assigned_doctor_id: { type: String, default: null, index: true },
     assigned_doctor_name: { type: String, default: null },
     assigned_nurse_id: { type: String, default: null, index: true },
@@ -146,7 +178,7 @@ CareRequestSchema.pre('save', function (next) {
       (Number(p.nurse_fee) || 0) +
       (Number(p.helper_fee) || 0) +
       (Number(p.platform_fee) || 0);
-    this.payment.total = sum;
+    this.payment.total = roundMoney(sum);
   }
   next();
 });

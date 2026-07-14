@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/config/support_config.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
@@ -10,9 +11,9 @@ import '../auth_provider.dart';
 
 /// Demo credentials baked into the mock auth backend.
 const _demoCredentials = <UserRole, ({String email, String password})>{
-  UserRole.patient: (email: 'patient@meditreat.app', password: 'password'),
-  UserRole.doctor: (email: 'doctor@meditreat.app', password: 'password'),
-  UserRole.admin: (email: 'admin@meditreat.app', password: 'password'),
+  UserRole.patient: (email: 'patient@taafi.app', password: 'password'),
+  UserRole.doctor: (email: 'doctor@taafi.app', password: 'password'),
+  UserRole.admin: (email: 'admin@taafi.app', password: 'password'),
 };
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -177,13 +178,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               size: 36, color: Colors.white),
                         ),
                         const SizedBox(height: 24),
-                        Text('Medi-Treat',
+                        Text('Taafi',
                             style: MtTextStyles.displayLg
                                 .copyWith(color: MtColors.ink, fontSize: 36)),
                         const SizedBox(height: 4),
-                        Text('Post-Surgery Home Care',
-                            style: MtTextStyles.bodyMd
-                                .copyWith(color: MtColors.ink2)),
+                        Text(kBrandTaglineBn,
+                            textAlign: TextAlign.center,
+                            style: MtTextStyles.bodyMd.copyWith(
+                                color: MtColors.ink2,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w400)),
                         const SizedBox(height: 32),
 
                         // --- Persistent auth error banner ---

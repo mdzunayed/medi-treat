@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/theme/mt_colors.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
 import '../../auth/auth_provider.dart';
@@ -42,8 +42,8 @@ class _NurseMainShellState extends ConsumerState<NurseMainShell> {
         title: Text('Sign out?', style: MtTextStyles.h3),
         content: Text(
           'সাইন আউট করবেন?',
-          style: MtTextStyles.bodyMd
-              .copyWith(color: MtColors.ink2, fontFamily: 'Kalpurush'),
+          style: MtTextStyles.bodyMd.copyWith(
+              color: ctx.appColors.body, fontFamily: 'Kalpurush'),
         ),
         actions: [
           TextButton(
@@ -52,7 +52,8 @@ class _NurseMainShellState extends ConsumerState<NurseMainShell> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: MtColors.rejected),
+            style:
+                TextButton.styleFrom(foregroundColor: ctx.appColors.danger),
             child: const Text('Sign out'),
           ),
         ],
@@ -67,8 +68,9 @@ class _NurseMainShellState extends ConsumerState<NurseMainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Scaffold(
-      backgroundColor: MtColors.bg,
+      backgroundColor: c.canvas,
       body: SafeArea(
         bottom: false,
         child: Center(
@@ -87,20 +89,20 @@ class _NurseMainShellState extends ConsumerState<NurseMainShell> {
       ),
       bottomNavigationBar: NavigationBarTheme(
         data: NavigationBarThemeData(
-          backgroundColor: MtColors.surface,
-          indicatorColor: MtColors.brandSoft,
+          backgroundColor: c.surface,
+          indicatorColor: c.accent.withValues(alpha: 0.15),
           labelTextStyle: WidgetStateProperty.resolveWith(
             (states) => MtTextStyles.labelSm.copyWith(
               color: states.contains(WidgetState.selected)
-                  ? MtColors.brand700
-                  : MtColors.ink3,
+                  ? c.accent
+                  : c.muted,
             ),
           ),
           iconTheme: WidgetStateProperty.resolveWith(
             (states) => IconThemeData(
               color: states.contains(WidgetState.selected)
-                  ? MtColors.brand
-                  : MtColors.ink3,
+                  ? c.accent
+                  : c.muted,
             ),
           ),
         ),
@@ -142,10 +144,9 @@ class _NurseBanner extends ConsumerWidget {
   final VoidCallback onSignOut;
   const _NurseBanner({required this.onSignOut});
 
-  static const _onlineColor = Color(0xFF059669);
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.appColors;
     final user = ref.watch(currentUserProvider);
     final availability = ref.watch(doctorAvailabilityProvider);
     final online = availability.valueOrNull ?? true;
@@ -158,9 +159,9 @@ class _NurseBanner extends ConsumerWidget {
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: c.cardBorder),
       ),
       child: Column(
         children: [
@@ -169,8 +170,8 @@ class _NurseBanner extends ConsumerWidget {
               InitialsAvatar(
                 name: name,
                 size: 46,
-                backgroundColor: MtColors.brandSoft,
-                textColor: MtColors.brand,
+                backgroundColor: c.accent.withValues(alpha: 0.12),
+                textColor: c.accent,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -179,15 +180,14 @@ class _NurseBanner extends ConsumerWidget {
                   children: [
                     Text(
                       name,
-                      style: MtTextStyles.h3.copyWith(color: MtColors.ink),
+                      style: MtTextStyles.h3.copyWith(color: c.title),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       credentials.isEmpty ? 'Home care nurse' : credentials,
-                      style:
-                          MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                      style: MtTextStyles.bodySm.copyWith(color: c.body),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -197,7 +197,7 @@ class _NurseBanner extends ConsumerWidget {
               const NotificationBell(),
               IconButton(
                 tooltip: 'Sign out',
-                icon: const Icon(Icons.logout, color: MtColors.ink3, size: 20),
+                icon: Icon(Icons.logout, color: c.muted, size: 20),
                 onPressed: onSignOut,
               ),
             ],
@@ -206,7 +206,7 @@ class _NurseBanner extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
             decoration: BoxDecoration(
-              color: online ? const Color(0xFFDCF3E7) : MtColors.bg,
+              color: online ? c.positiveBg : c.surfaceHi,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -214,7 +214,7 @@ class _NurseBanner extends ConsumerWidget {
                 Icon(
                   online ? Icons.bolt : Icons.bolt_outlined,
                   size: 16,
-                  color: online ? _onlineColor : MtColors.ink3,
+                  color: online ? c.positive : c.muted,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -223,13 +223,13 @@ class _NurseBanner extends ConsumerWidget {
                         ? 'On duty · discoverable for dispatches'
                         : 'Off duty · not receiving dispatches',
                     style: MtTextStyles.labelMd.copyWith(
-                      color: online ? _onlineColor : MtColors.ink3,
+                      color: online ? c.positive : c.muted,
                     ),
                   ),
                 ),
                 Switch.adaptive(
                   value: online,
-                  activeThumbColor: _onlineColor,
+                  activeThumbColor: c.positive,
                   onChanged: isBusy
                       ? null
                       : (_) => ref

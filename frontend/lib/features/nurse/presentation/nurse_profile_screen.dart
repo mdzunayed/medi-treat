@@ -201,7 +201,7 @@ class _ProfileBody extends ConsumerWidget {
           icon: Icons.support_agent_rounded,
           tint: const Color(0xFF1D4ED8),
           title: 'Help & Support',
-          subtitle: 'Reach the Medi-Treat care operations desk',
+          subtitle: 'Reach the Taafi care operations desk',
           onTap: () => _openPlaceholder(
             context,
             title: 'Help & Support',
@@ -743,7 +743,7 @@ class _EditDetailsSheetState extends ConsumerState<_EditDetailsSheet> {
                   const SizedBox(height: 6),
                   _SheetField(
                     controller: _email,
-                    hint: 'e.g. nurse@medi-treat.com',
+                    hint: 'e.g. nurse@taafi.app',
                     keyboardType: TextInputType.emailAddress,
                     validator: (v) {
                       final t = v?.trim() ?? '';

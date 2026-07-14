@@ -5,14 +5,16 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/api/patient_home_repository.dart';
 import '../../../core/config/support_config.dart';
+import '../../../core/models/booking_transaction.dart';
 import '../../../core/models/patient_active_request.dart';
 import '../../../core/models/patient_request_status.dart';
-import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/mt_empty_state.dart';
 import '../../../core/widgets/mt_skeleton.dart';
 import '../../../core/widgets/status_badge.dart';
 import '../navigation/patient_nav_provider.dart';
+import 'booking_flow_pages.dart';
+import 'widgets/patient_home_palette.dart';
 
 final _moneyFmt = NumberFormat('#,###', 'en_US');
 String _money(num n) => '৳${_moneyFmt.format(n.round())}';
@@ -41,6 +43,7 @@ class _UnderReviewTabState extends ConsumerState<UnderReviewTab> {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     final feedAsync = ref.watch(patientHomeFeedProvider);
     final activeRequest = ref.watch(patientActiveRequestProvider);
 
@@ -63,7 +66,7 @@ class _UnderReviewTabState extends ConsumerState<UnderReviewTab> {
     });
 
     return RefreshIndicator(
-      color: MtColors.brand,
+      color: hd.violet,
       onRefresh: _refresh,
       child: feedAsync.when(
         loading: () => const _LoadingView(),
@@ -75,6 +78,15 @@ class _UnderReviewTabState extends ConsumerState<UnderReviewTab> {
           if (activeRequest == null) {
             return const _EmptyView();
           }
+          // Two-phase booking gate. While the request is in a confirmation
+          // state (awaiting deposit / under review / awaiting final payment)
+          // we render the dedicated midnight booking surface instead of the
+          // legacy provider-dispatch timeline.
+          final bookingStatus =
+              BookingStatusX.fromWire(activeRequest.rawStatus);
+          if (_isBookingPhase(bookingStatus)) {
+            return _BookingPhaseView(request: activeRequest);
+          }
           final status = activeRequest.status;
           if (!status.isActive) {
             return _TerminalView(request: activeRequest);
@@ -83,6 +95,205 @@ class _UnderReviewTabState extends ConsumerState<UnderReviewTab> {
           // auto-advance to tracking) render here.
           return _ReviewView(request: activeRequest);
         },
+      ),
+    );
+  }
+}
+
+/// Whether the request is still inside the two-phase confirmation gate
+/// (deposit / review / awaiting final payment) — i.e. before it enters the
+/// normal provider-dispatch pipeline.
+bool _isBookingPhase(BookingStatus s) {
+  switch (s) {
+    case BookingStatus.awaitingDeposit:
+    case BookingStatus.depositPaidAdminReviewing:
+    case BookingStatus.amountAssignedAwaitingFinalPayment:
+      return true;
+    case BookingStatus.completed:
+    case BookingStatus.cancelled:
+      return false;
+  }
+}
+
+// ============================================================================
+// Two-phase booking surface (midnight theme)
+// ============================================================================
+
+/// Full-bleed midnight surface that renders the current booking phase: the
+/// ৳100 deposit prompt, the "under review" invoice placeholder, or the live
+/// dynamic invoice with the outstanding balance + Pay CTA.
+class _BookingPhaseView extends ConsumerWidget {
+  final PatientActiveRequest request;
+
+  const _BookingPhaseView({required this.request});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hd = HomeDark.of(context);
+    final booking = BookingTransaction.fromActiveRequest(request);
+    return Container(
+      color: hd.canvas,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
+        children: [
+          Text(
+            'REQUEST #${request.id}',
+            style: TextStyle(
+              color: hd.muted,
+              fontSize: 11,
+              letterSpacing: 1.4,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (booking.status == BookingStatus.awaitingDeposit)
+            _DepositPrompt(
+              booking: booking,
+              onPay: () => showConfirmAppointmentRequestSheet(
+                context,
+                bookingId: booking.bookingId,
+                serviceName: booking.serviceName,
+              ),
+            )
+          else
+            DynamicInvoiceCard(booking: booking),
+          const SizedBox(height: 18),
+          _MidnightAdminLink(requestId: request.id),
+        ],
+      ),
+    );
+  }
+}
+
+class _DepositPrompt extends StatelessWidget {
+  final BookingTransaction booking;
+  final VoidCallback onPay;
+
+  const _DepositPrompt({required this.booking, required this.onPay});
+
+  @override
+  Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [hd.surface, hd.canvas],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: hd.border),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                booking.serviceName.isEmpty
+                    ? 'Care service'
+                    : booking.serviceName,
+                style: TextStyle(
+                  color: hd.title,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              BookingStatusPill(status: booking.status),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Your request is saved but not confirmed yet. Pay the ৳100 '
+            'confirmation deposit to lock your slot and connect with our '
+            'care management team. It is deducted from your final bill.',
+            style: TextStyle(color: hd.body, fontSize: 13, height: 1.45),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  colors: [hd.violet2, hd.violet],
+                ),
+                boxShadow: [BoxShadow(color: hd.glow, blurRadius: 20)],
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onPay,
+                  borderRadius: BorderRadius.circular(16),
+                  child: const Center(
+                    child: Text(
+                      'Complete ৳100 deposit',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MidnightAdminLink extends StatelessWidget {
+  final String requestId;
+  const _MidnightAdminLink({required this.requestId});
+
+  Future<void> _chatAdmin(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final digits =
+        SupportConfig.supportPhone.replaceAll(RegExp(r'[^0-9]'), '');
+    final body = Uri.encodeComponent(
+      'Hi Taafi admin, I have a question about booking $requestId.',
+    );
+    final uri = Uri.parse('https://wa.me/$digits?text=$body');
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Reach admin at ${SupportConfig.supportPhoneDisplay}',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      messenger.showSnackBar(
+        SnackBar(
+          content:
+              Text('Reach admin at ${SupportConfig.supportPhoneDisplay}'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
+    return Center(
+      child: TextButton.icon(
+        onPressed: () => _chatAdmin(context),
+        icon: Icon(Icons.chat_bubble_outline,
+            size: 16, color: hd.violetBright),
+        label: Text(
+          'Chat care management',
+          style: TextStyle(color: hd.violetBright, fontSize: 13),
+        ),
       ),
     );
   }
@@ -211,23 +422,24 @@ class _TerminalView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hd = HomeDark.of(context);
     final isCompleted = request.status == PatientRequestStatus.completed;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 32, 16, 24),
       children: [
-        Icon(_icon, color: MtColors.brand, size: 56),
+        Icon(_icon, color: hd.violet, size: 56),
         const SizedBox(height: 12),
         Text(
           _title,
           textAlign: TextAlign.center,
-          style: MtTextStyles.h2.copyWith(color: MtColors.ink),
+          style: MtTextStyles.h2.copyWith(color: hd.title),
         ),
         const SizedBox(height: 6),
         Text(
           _subtitle,
           textAlign: TextAlign.center,
-          style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+          style: MtTextStyles.bodyMd.copyWith(color: hd.body),
         ),
         const SizedBox(height: 24),
         _SummaryCard(request: request),
@@ -240,7 +452,7 @@ class _TerminalView extends ConsumerWidget {
                 ? ref.goToActivities(sub: PatientActivitiesTab.history)
                 : ref.goToNewRequest(),
             style: ElevatedButton.styleFrom(
-              backgroundColor: MtColors.brand,
+              backgroundColor: hd.violet,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -267,7 +479,7 @@ class _ReviewView extends ConsumerWidget {
     final digits =
         SupportConfig.supportPhone.replaceAll(RegExp(r'[^0-9]'), '');
     final body = Uri.encodeComponent(
-      'Hi Medi-Treat admin, I have a question about request ${request.id}.',
+      'Hi Taafi admin, I have a question about request ${request.id}.',
     );
     final uri = Uri.parse('https://wa.me/$digits?text=$body');
     try {
@@ -293,6 +505,7 @@ class _ReviewView extends ConsumerWidget {
   }
 
   Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
+    final hd = HomeDark.of(context);
     final messenger = ScaffoldMessenger.of(context);
     final reason = await showDialog<_CancelDialogResult>(
       context: context,
@@ -307,14 +520,14 @@ class _ReviewView extends ConsumerWidget {
       messenger.showSnackBar(
         SnackBar(
           content: Text('Request ${request.id} cancelled'),
-          backgroundColor: MtColors.completed,
+          backgroundColor: hd.positive,
         ),
       );
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(
           content: Text('Could not cancel request: $e'),
-          backgroundColor: MtColors.rejected,
+          backgroundColor: hd.danger,
         ),
       );
     }
@@ -341,20 +554,33 @@ class _ReviewView extends ConsumerWidget {
                 onTap: () => _chatAdmin(context),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _OutlinedAction(
-                icon: Icons.close,
-                label: 'Cancel request',
-                onTap: () => _confirmCancel(context, ref),
-                destructive: true,
+            // Self-cancel is only offered BEFORE a coordinator claims the
+            // dispatch — i.e. while the request is still `submitted`/`approved`
+            // (the same states the backend `POST /patient/requests/:id/cancel`
+            // guard permits). Once it moves into active processing (`assigned`
+            // and beyond) only an admin can cancel, so the button disappears.
+            if (_patientCancellable) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: _OutlinedAction(
+                  icon: Icons.close,
+                  label: 'Cancel request',
+                  onTap: () => _confirmCancel(context, ref),
+                  destructive: true,
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ],
     );
   }
+
+  /// True only for the pre-assignment states the patient may still cancel.
+  /// Uses the exact backend wire status ([PatientActiveRequest.rawStatus]) so
+  /// the UI matches the server-side guard precisely.
+  bool get _patientCancellable =>
+      const {'submitted', 'approved'}.contains(request.rawStatus);
 }
 
 // ============================================================================
@@ -391,6 +617,7 @@ class _HeroSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     final copy = _copyFor(status);
     return Column(
       children: [
@@ -403,16 +630,16 @@ class _HeroSection extends StatelessWidget {
               Container(
                 width: 104,
                 height: 104,
-                decoration: const BoxDecoration(
-                  color: MtColors.brandSofter,
+                decoration: BoxDecoration(
+                  color: hd.surfaceHi,
                   shape: BoxShape.circle,
                 ),
               ),
               Container(
                 width: 76,
                 height: 76,
-                decoration: const BoxDecoration(
-                  color: MtColors.brandSoft,
+                decoration: BoxDecoration(
+                  color: hd.violet.withValues(alpha: 0.14),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -420,11 +647,11 @@ class _HeroSection extends StatelessWidget {
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: MtColors.surface,
+                  color: hd.surface,
                   shape: BoxShape.circle,
-                  border: Border.all(color: MtColors.brand, width: 1.5),
+                  border: Border.all(color: hd.violet, width: 1.5),
                 ),
-                child: Icon(copy.icon, color: MtColors.brand, size: 24),
+                child: Icon(copy.icon, color: hd.violet, size: 24),
               ),
             ],
           ),
@@ -432,20 +659,20 @@ class _HeroSection extends StatelessWidget {
         const SizedBox(height: 16),
         Text(
           copy.en,
-          style: MtTextStyles.h2.copyWith(color: MtColors.ink),
+          style: MtTextStyles.h2.copyWith(color: hd.title),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 8),
         Text(
           copy.hint,
-          style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+          style: MtTextStyles.bodyMd.copyWith(color: hd.body),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 6),
         Text(
           copy.bn,
           style: MtTextStyles.bodySm.copyWith(
-            color: MtColors.brand,
+            color: hd.violet,
             fontFamily: 'Kalpurush',
           ),
         ),
@@ -586,12 +813,13 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     final steps = _stepsFor(request);
     return Container(
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: hd.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: hd.border),
       ),
       child: Column(
         children: [
@@ -606,7 +834,7 @@ class _StatusCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: MtTextStyles.sectionLabel.copyWith(
-                      color: MtColors.ink3,
+                      color: hd.muted,
                       letterSpacing: 1.0,
                     ),
                   ),
@@ -619,7 +847,7 @@ class _StatusCard extends StatelessWidget {
               ],
             ),
           ),
-          const Divider(height: 1, color: MtColors.line),
+          Divider(height: 1, color: hd.border),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
             child: Column(
@@ -659,6 +887,7 @@ class _StepRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     final isDone = step.state == _StepState.done;
     final isActive = step.state == _StepState.active;
     final isPending = step.state == _StepState.pending;
@@ -675,10 +904,10 @@ class _StepRow extends StatelessWidget {
                 height: 22,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: filled ? MtColors.brand : Colors.transparent,
+                  color: filled ? hd.violet : Colors.transparent,
                   border: filled
                       ? null
-                      : Border.all(color: MtColors.ink3, width: 1.5),
+                      : Border.all(color: hd.muted, width: 1.5),
                 ),
                 child: isDone
                     ? const Icon(Icons.check, size: 14, color: Colors.white)
@@ -690,7 +919,7 @@ class _StepRow extends StatelessWidget {
                 Expanded(
                   child: Container(
                     width: 2,
-                    color: isDone ? MtColors.brand : MtColors.line,
+                    color: isDone ? hd.violet : hd.border,
                   ),
                 ),
             ],
@@ -705,14 +934,14 @@ class _StepRow extends StatelessWidget {
                   Text(
                     step.label,
                     style: MtTextStyles.labelLg.copyWith(
-                      color: isPending ? MtColors.ink3 : MtColors.ink,
+                      color: isPending ? hd.muted : hd.title,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     step.subtitle,
                     style: MtTextStyles.bodySm.copyWith(
-                      color: isActive ? MtColors.brand : MtColors.ink3,
+                      color: isActive ? hd.violet : hd.muted,
                       fontWeight:
                           isActive ? FontWeight.w600 : FontWeight.w400,
                     ),
@@ -788,6 +1017,7 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     final rows = <(String, String)>[
       ('Service', _serviceLabel()),
       ('Location', request.locationLabel),
@@ -799,9 +1029,9 @@ class _SummaryCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: hd.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: hd.border),
       ),
       child: Column(
         children: [
@@ -812,13 +1042,13 @@ class _SummaryCard extends StatelessWidget {
               child: Text(
                 'SUMMARY',
                 style: MtTextStyles.sectionLabel.copyWith(
-                  color: MtColors.ink3,
+                  color: hd.muted,
                   letterSpacing: 1.0,
                 ),
               ),
             ),
           ),
-          const Divider(height: 1, color: MtColors.line),
+          Divider(height: 1, color: hd.border),
           for (int i = 0; i < rows.length; i++) ...[
             Padding(
               padding: const EdgeInsets.symmetric(
@@ -832,7 +1062,7 @@ class _SummaryCard extends StatelessWidget {
                     child: Text(
                       rows[i].$1,
                       style: MtTextStyles.bodyMd.copyWith(
-                        color: MtColors.ink3,
+                        color: hd.muted,
                       ),
                     ),
                   ),
@@ -841,16 +1071,16 @@ class _SummaryCard extends StatelessWidget {
                     child: Text(
                       rows[i].$2,
                       textAlign: TextAlign.right,
-                      style: MtTextStyles.labelMd.copyWith(color: MtColors.ink),
+                      style: MtTextStyles.labelMd.copyWith(color: hd.title),
                     ),
                   ),
                 ],
               ),
             ),
             if (i != rows.length - 1)
-              const Divider(
+              Divider(
                   height: 1,
-                  color: MtColors.line,
+                  color: hd.border,
                   indent: 16,
                   endIndent: 16),
           ],
@@ -875,7 +1105,8 @@ class _OutlinedAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = destructive ? MtColors.rejected : MtColors.ink;
+    final hd = HomeDark.of(context);
+    final color = destructive ? hd.danger : hd.title;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -884,12 +1115,12 @@ class _OutlinedAction extends StatelessWidget {
         child: Container(
           height: 48,
           decoration: BoxDecoration(
-            color: MtColors.surface,
+            color: hd.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: destructive
-                  ? MtColors.rejected.withValues(alpha: 0.5)
-                  : MtColors.line,
+                  ? hd.danger.withValues(alpha: 0.5)
+                  : hd.border,
             ),
           ),
           alignment: Alignment.center,
@@ -953,6 +1184,7 @@ class _CancelConfirmDialogState extends State<_CancelConfirmDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return AlertDialog(
       shape:
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -964,13 +1196,13 @@ class _CancelConfirmDialogState extends State<_CancelConfirmDialog> {
           children: [
             Text(
               "You'll lose your place in the queue. Any escrowed payment is refunded within 24 hrs.",
-              style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+              style: MtTextStyles.bodyMd.copyWith(color: hd.body),
             ),
             const SizedBox(height: 14),
             Text(
               'WHY ARE YOU CANCELLING?',
               style: MtTextStyles.sectionLabel.copyWith(
-                color: MtColors.ink3,
+                color: hd.muted,
                 letterSpacing: 1.0,
               ),
             ),
@@ -988,18 +1220,18 @@ class _CancelConfirmDialogState extends State<_CancelConfirmDialog> {
                         _selected = _selected == reason ? null : reason;
                       });
                     },
-                    selectedColor: MtColors.brandSoft,
+                    selectedColor: hd.violet.withValues(alpha: 0.14),
                     labelStyle: MtTextStyles.labelSm.copyWith(
                       color: _selected == reason
-                          ? MtColors.brand700
-                          : MtColors.ink2,
+                          ? hd.violetDeep
+                          : hd.body,
                     ),
                     side: BorderSide(
                       color: _selected == reason
-                          ? MtColors.brand
-                          : MtColors.line,
+                          ? hd.violet
+                          : hd.border,
                     ),
-                    backgroundColor: MtColors.surface,
+                    backgroundColor: hd.surface,
                   ),
               ],
             ),
@@ -1011,19 +1243,19 @@ class _CancelConfirmDialogState extends State<_CancelConfirmDialog> {
               decoration: InputDecoration(
                 hintText: 'Other (optional)',
                 hintStyle:
-                    MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+                    MtTextStyles.bodySm.copyWith(color: hd.muted),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: MtColors.line),
+                  borderSide: BorderSide(color: hd.border),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: MtColors.line),
+                  borderSide: BorderSide(color: hd.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide:
-                      const BorderSide(color: MtColors.brand, width: 1.5),
+                      BorderSide(color: hd.violet, width: 1.5),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
@@ -1039,7 +1271,7 @@ class _CancelConfirmDialogState extends State<_CancelConfirmDialog> {
           onPressed: () => Navigator.of(context).pop(
             const _CancelDialogResult(confirmed: false),
           ),
-          style: TextButton.styleFrom(foregroundColor: MtColors.ink2),
+          style: TextButton.styleFrom(foregroundColor: hd.body),
           child: Text('Keep request', style: MtTextStyles.labelMd),
         ),
         TextButton(
@@ -1049,7 +1281,7 @@ class _CancelConfirmDialogState extends State<_CancelConfirmDialog> {
               reason: _finalReason(),
             ),
           ),
-          style: TextButton.styleFrom(foregroundColor: MtColors.rejected),
+          style: TextButton.styleFrom(foregroundColor: hd.danger),
           child: Text('Cancel request', style: MtTextStyles.labelMd),
         ),
       ],

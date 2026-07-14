@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/mt_colors.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../notifications/widgets/notification_bell.dart';
 import '../navigation/patient_nav_provider.dart';
 import '../history/patient_history_tab.dart';
-import '../../prescriptions/patient_medication_timeline_screen.dart';
+import '../../prescriptions/medications_tab_view.dart';
 import 'tracking_tab.dart';
 import 'under_review_tab.dart';
 
@@ -73,7 +73,7 @@ class _PatientActivitiesScreenState
     });
 
     return Scaffold(
-      backgroundColor: MtColors.bg,
+      backgroundColor: context.appColors.canvas,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -91,7 +91,7 @@ class _PatientActivitiesScreenState
                       UnderReviewTab(),
                       TrackingTab(),
                       PatientHistoryTab(),
-                      PatientMedicationTimelineScreen(),
+                      MedicationsTabView(),
                     ],
                   ),
                 ),
@@ -108,28 +108,34 @@ class _PatientActivitiesScreenState
 // Header + tab bar
 // ---------------------------------------------------------------------------
 
-class _ActivitiesHeader extends StatelessWidget {
+class _ActivitiesHeader extends ConsumerWidget {
   const _ActivitiesHeader();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.appColors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
       child: Row(
         children: [
+          IconButton(
+            onPressed: () => ref.goToHome(),
+            icon: Icon(Icons.arrow_back, color: c.accent),
+            tooltip: 'Back to home',
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Your activities',
-                  style: MtTextStyles.h1.copyWith(color: MtColors.ink),
+                  style: MtTextStyles.h1.copyWith(color: c.title),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'আপনার কার্যক্রম',
                   style: MtTextStyles.bodySm.copyWith(
-                    color: MtColors.ink2,
+                    color: c.body,
                     fontFamily: 'Kalpurush',
                   ),
                 ),
@@ -158,24 +164,24 @@ class _ActivitiesTabBar extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isScrollable = constraints.maxWidth < _scrollThreshold;
+          final c = context.appColors;
           return Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              // Soft grey tray — more tonal than pure white
-              color: MtColors.bg,
+              // Soft tonal tray — sits just above the canvas
+              color: c.surfaceHi,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: MtColors.line),
+              border: Border.all(color: c.cardBorder),
             ),
             child: TabBar(
               controller: controller,
-              // Pill-shaped sliding indicator with brand-orange glow
+              // Pill-shaped sliding indicator with a brand glow
               indicator: BoxDecoration(
-                color: MtColors.brand,
+                color: c.brand,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    // MtColors.brand (0xFFEA580C) at 28 % opacity
-                    color: const Color.fromRGBO(234, 88, 12, 0.28),
+                    color: c.glow,
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
@@ -183,8 +189,8 @@ class _ActivitiesTabBar extends StatelessWidget {
               ),
               indicatorSize: TabBarIndicatorSize.tab,
               dividerColor: Colors.transparent,
-              labelColor: Colors.white,
-              unselectedLabelColor: MtColors.ink2,
+              labelColor: c.onAccent,
+              unselectedLabelColor: c.body,
               labelStyle: MtTextStyles.labelMd
                   .copyWith(fontWeight: FontWeight.w700),
               unselectedLabelStyle: MtTextStyles.labelMd

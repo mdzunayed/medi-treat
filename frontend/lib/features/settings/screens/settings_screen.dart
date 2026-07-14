@@ -4,20 +4,21 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../../core/theme/mt_colors.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_text_styles.dart';
+import '../../../core/theme/theme_provider.dart';
 import '../../auth/auth_provider.dart';
 
 /// SharedPreferences keys for the local-only toggles. Once a settings
 /// backend ships these can move behind a `/api/users/:id/preferences`
-/// endpoint without changing any UI.
+/// endpoint without changing any UI. (Dark-mode persistence lives in
+/// [themeModeProvider] under [kDarkModePrefKey].)
 const _kNotificationsPush = 'user.settings.notifications_push';
-const _kDarkMode = 'user.settings.dark_mode';
 
 /// Dedicated `/settings` screen for the doctor + patient flows. Layout
 /// pattern mirrors the admin `settings_tab.dart` so all three roles
 /// feel like one design system. Settings persist via SharedPreferences;
-/// theme switching is intentionally deferred — see plan file.
+/// the Dark Mode toggle drives [themeModeProvider], flipping the whole app.
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
@@ -28,7 +29,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   SharedPreferences? _prefs;
   bool _pushOn = false;
-  bool _darkOn = false;
   bool _loaded = false;
 
   @override
@@ -38,14 +38,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _prefs = prefs;
-      _pushOn = prefs.getBool(_kNotificationsPush) ?? true;
-      _darkOn = prefs.getBool(_kDarkMode) ?? false;
-      _loaded = true;
-    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _prefs = prefs;
+        _pushOn = prefs.getBool(_kNotificationsPush) ?? true;
+      });
+    } catch (_) {
+      // Prefs unavailable (rare platform failure) — fall through with the
+      // defaults so the screen still renders instead of sitting on the
+      // loading gate forever.
+    } finally {
+      if (mounted) setState(() => _loaded = true);
+    }
   }
 
   Future<void> _setPush(bool v) async {
@@ -53,37 +59,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _prefs?.setBool(_kNotificationsPush, v);
   }
 
-  Future<void> _setDark(bool v) async {
-    setState(() => _darkOn = v);
-    await _prefs?.setBool(_kDarkMode, v);
-    if (!mounted) return;
-    // The theme provider isn't wired yet — let the user know the
-    // preference is captured but visually nothing flips.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-            'Dark mode preference saved — full theme switching ships next.'),
-      ),
-    );
-  }
-
   Future<void> _openTerms() async {
+    final c = context.appColors;
     showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: Text('Terms of Service', style: MtTextStyles.h3),
+        title: Text('Terms of Service',
+            style: MtTextStyles.h3.copyWith(color: c.title)),
         content: SizedBox(
           width: 480,
           child: SingleChildScrollView(
             child: Text(
-              'By using Medi-Treat you agree to our standard terms of service. '
+              'By using Taafi you agree to our standard terms of service. '
               'Full legal copy will be published before the public launch. '
               'For specific questions in the meantime, contact support.',
               style: MtTextStyles.bodyMd.copyWith(
-                color: MtColors.ink2,
+                color: c.body,
                 height: 1.45,
               ),
             ),
@@ -92,7 +86,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            style: TextButton.styleFrom(foregroundColor: MtColors.brand),
+            style: TextButton.styleFrom(foregroundColor: c.brand),
             child: const Text('Close'),
           ),
         ],
@@ -101,7 +95,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _openHelpCenter() async {
-    final uri = Uri.parse('https://meditreat.app/help');
+    final uri = Uri.parse('https://taafi.app/help');
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -111,9 +105,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _openPrivacyStub() async {
+    final c = context.appColors;
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: c.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -130,19 +125,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: MtColors.line,
+                    color: c.cardBorder,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
               const SizedBox(height: 14),
               Text('Privacy & Security',
-                  style: MtTextStyles.h3.copyWith(color: MtColors.ink)),
+                  style: MtTextStyles.h3.copyWith(color: c.title)),
               const SizedBox(height: 6),
               Text(
                 'Session management, two-factor authentication, and data exports will live here. We are still building the underlying audit log — check back soon.',
-                style:
-                    MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                style: MtTextStyles.bodySm.copyWith(color: c.body),
               ),
             ],
           ),
@@ -152,6 +146,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _confirmDeleteAccount() async {
+    final c = context.appColors;
     final controller = TextEditingController();
     bool canConfirm = false;
     final confirmed = await showDialog<bool>(
@@ -163,7 +158,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           title: Text(
             'Delete account?',
-            style: MtTextStyles.h3.copyWith(color: MtColors.rejected),
+            style: MtTextStyles.h3.copyWith(color: c.danger),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -174,7 +169,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 'In-flight visits stay active; permanent removal happens '
                 'within 30 days. Type DELETE to confirm.',
                 style: MtTextStyles.bodyMd
-                    .copyWith(color: MtColors.ink2, height: 1.4),
+                    .copyWith(color: c.body, height: 1.4),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -184,12 +179,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   hintText: 'Type DELETE',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: MtColors.line),
+                    borderSide: BorderSide(color: c.cardBorder),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide:
-                        const BorderSide(color: MtColors.rejected, width: 1.5),
+                    borderSide: BorderSide(color: c.danger, width: 1.5),
                   ),
                 ),
                 onChanged: (v) {
@@ -201,7 +195,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              style: TextButton.styleFrom(foregroundColor: MtColors.ink2),
+              style: TextButton.styleFrom(foregroundColor: c.body),
               child: const Text('Cancel'),
             ),
             TextButton(
@@ -209,9 +203,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ? () => Navigator.of(dialogContext).pop(true)
                   : null,
               style: TextButton.styleFrom(
-                foregroundColor: MtColors.rejected,
-                disabledForegroundColor:
-                    MtColors.rejected.withValues(alpha: 0.35),
+                foregroundColor: c.danger,
+                disabledForegroundColor: c.danger.withValues(alpha: 0.35),
               ),
               child: const Text('Delete'),
             ),
@@ -225,10 +218,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref.read(authTokenProvider.notifier).logout();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
+      SnackBar(
+        content: const Text(
             'Deletion queued — contact support to finalize before 30 days.'),
-        backgroundColor: MtColors.rejected,
+        backgroundColor: c.danger,
       ),
     );
     context.go('/login');
@@ -236,23 +229,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     if (!_loaded) {
-      return const Scaffold(
-        backgroundColor: MtColors.bg,
-        body: Center(child: CircularProgressIndicator(color: MtColors.brand)),
+      return Scaffold(
+        backgroundColor: c.canvas,
+        body: Center(child: CircularProgressIndicator(color: c.brand)),
       );
     }
+    final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     return Scaffold(
-      backgroundColor: MtColors.bg,
+      backgroundColor: c.canvas,
       appBar: AppBar(
-        backgroundColor: MtColors.bg,
+        backgroundColor: c.canvas,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: MtColors.ink),
+          icon: Icon(Icons.arrow_back, color: c.title),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
-        title: Text('Settings', style: MtTextStyles.h3),
+        title: Text('Settings', style: MtTextStyles.h3.copyWith(color: c.title)),
       ),
       body: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -287,11 +282,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 onChanged: _setPush,
               ),
               _ToggleTile(
-                icon: Icons.dark_mode_outlined,
+                icon: isDark ? Icons.dark_mode : Icons.dark_mode_outlined,
                 label: 'Dark Mode',
-                subtitle: 'Preference is saved; full theme ships soon',
-                value: _darkOn,
-                onChanged: _setDark,
+                subtitle: 'Switch the whole app between light and dark',
+                value: isDark,
+                onChanged: (v) =>
+                    ref.read(themeModeProvider.notifier).setDark(v),
               ),
             ],
           ),
@@ -344,11 +340,12 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: c.cardBorder),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -359,16 +356,16 @@ class _Section extends StatelessWidget {
             child: Text(
               title.toUpperCase(),
               style: MtTextStyles.labelSm.copyWith(
-                color: MtColors.ink3,
+                color: c.muted,
                 letterSpacing: 0.9,
               ),
             ),
           ),
           for (var i = 0; i < tiles.length; i++) ...[
             if (i > 0)
-              const Divider(
+              Divider(
                 height: 1,
-                color: MtColors.line,
+                color: c.cardBorder,
                 indent: 64,
                 endIndent: 16,
               ),
@@ -396,7 +393,8 @@ class _Tile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = danger ? MtColors.rejected : MtColors.brand;
+    final c = context.appColors;
+    final accent = danger ? c.danger : c.brand;
     return ListTile(
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -413,17 +411,16 @@ class _Tile extends StatelessWidget {
       title: Text(
         label,
         style: MtTextStyles.labelLg.copyWith(
-          color: danger ? MtColors.rejected : MtColors.ink,
+          color: danger ? c.danger : c.title,
         ),
       ),
       subtitle: subtitle == null
           ? null
           : Text(
               subtitle!,
-              style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+              style: MtTextStyles.bodySm.copyWith(color: c.muted),
             ),
-      trailing:
-          const Icon(Icons.chevron_right, color: MtColors.ink3, size: 22),
+      trailing: Icon(Icons.chevron_right, color: c.muted, size: 22),
     );
   }
 }
@@ -444,27 +441,28 @@ class _ToggleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return SwitchListTile.adaptive(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       activeThumbColor: Colors.white,
-      activeTrackColor: MtColors.brand,
+      activeTrackColor: c.brand,
       secondary: Container(
         width: 36,
         height: 36,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: MtColors.brand.withValues(alpha: 0.12),
+          color: c.brand.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(icon, color: MtColors.brand, size: 18),
+        child: Icon(icon, color: c.brand, size: 18),
       ),
       title: Text(label,
-          style: MtTextStyles.labelLg.copyWith(color: MtColors.ink)),
+          style: MtTextStyles.labelLg.copyWith(color: c.title)),
       subtitle: subtitle == null
           ? null
           : Text(
               subtitle!,
-              style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+              style: MtTextStyles.bodySm.copyWith(color: c.muted),
             ),
       value: value,
       onChanged: onChanged,

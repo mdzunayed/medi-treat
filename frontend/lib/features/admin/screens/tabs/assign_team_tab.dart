@@ -909,7 +909,10 @@ class _FinalizeAssignmentBar extends ConsumerWidget {
         // bar flips to "Next request" once the notifier transitions
         // to `done`, so no extra navigation is required here.
       }
-    });
+      // assignTeam reports failure via its returned bool + notifier state
+      // (it never throws today), but this fire-and-forget chain must not
+      // turn into an unhandled future if that contract ever changes.
+    }).catchError((Object _) {});
   }
 }
 

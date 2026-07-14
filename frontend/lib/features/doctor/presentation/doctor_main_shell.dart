@@ -3,10 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/doctor_dashboard.dart';
-import '../../../core/theme/mt_colors.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
 import '../../auth/auth_provider.dart';
+import '../../navigation/presentation/widgets/custom_floating_navbar.dart';
 import '../../prescriptions/doctor_prescription_screen.dart';
 import '../../provider/presentation/doctor_dashboard_tabs.dart';
 import '../doctor_providers.dart';
@@ -14,22 +15,15 @@ import '../screens/doctor_profile_screen.dart';
 import 'controllers/doctor_nav_controller.dart';
 
 // ───────────────────────────────────────────────────────────────────────────
-// Physician palette — deep slate foundations + a clinical teal accent, kept
-// deliberately distinct from the admin console's brand-orange so the two
-// surfaces never read as the same product.
+// Dark chrome reserved for the ALWAYS-DARK surfaces of this shell — the wide
+// navigation rail and the active-call banner keep a deep-slate look in both
+// themes (deliberate design intent, like the floating navbar pill). Every
+// adaptive surface below reads `context.appColors` tokens instead so light
+// values can't leak into dark mode.
 // ───────────────────────────────────────────────────────────────────────────
 const Color _slate = Color(0xFF0F172A);
 const Color _slate700 = Color(0xFF1E293B);
 const Color _slate400 = Color(0xFF94A3B8);
-// Primary accent — aligned with the patient app's burnt-orange brand so the
-// doctor module shares one signature across roles. Dark-slate foundations
-// above stay put for contrast/typography.
-const Color _teal = MtColors.brand;
-const Color _tealSoft = MtColors.brandSofter;
-// Semantic on-duty / online status stays green (not the brand accent) so the
-// duty pill + toggle keep the universal "online = green" cue.
-const Color _onlineGreen = MtColors.completed;
-const Color _onlineGreenSoft = Color(0xFFDCFCE7);
 const Color _coral = Color(0xFFF43F5E);
 
 /// Premium, adaptive application shell for the Doctor role. Serves a
@@ -61,10 +55,11 @@ class DoctorMainShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final index = ref.watch(doctorNavProvider);
     final alert = ref.watch(doctorLiveAlertProvider);
+    final pendingTriage = ref.watch(pendingTriageCountProvider);
     final isWide = MediaQuery.sizeOf(context).width >= 900;
 
     return Scaffold(
-      backgroundColor: MtColors.bg,
+      backgroundColor: context.appColors.canvas,
       body: SafeArea(
         child: Row(
           children: [
@@ -106,9 +101,19 @@ class DoctorMainShell extends ConsumerWidget {
       ),
       bottomNavigationBar: isWide
           ? null
-          : _DoctorBottomBar(
-              index: index,
-              onSelect: (i) => _select(ref, i),
+          : CustomFloatingNavBar(
+              currentIndex: index,
+              onTap: (i) => _select(ref, i),
+              items: [
+                for (final tab in DoctorTab.values)
+                  FloatingNavItem(
+                    icon: tab.icon,
+                    activeIcon: tab.selectedIcon,
+                    label: tab.label,
+                    badgeCount:
+                        tab == DoctorTab.appointments ? pendingTriage : 0,
+                  ),
+              ],
             ),
     );
   }
@@ -140,7 +145,7 @@ class _DoctorRail extends ConsumerWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: _teal,
+              color: context.appColors.accent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(Icons.medical_services_rounded,
@@ -168,7 +173,7 @@ class _DoctorRail extends ConsumerWidget {
               width: 10,
               height: 10,
               decoration: BoxDecoration(
-                color: online ? _onlineGreen : _slate400,
+                color: online ? context.appColors.positive : _slate400,
                 shape: BoxShape.circle,
               ),
             ),
@@ -202,6 +207,7 @@ class _RailItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = context.appColors.accent;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
       child: InkWell(
@@ -211,14 +217,15 @@ class _RailItem extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? _teal.withValues(alpha: 0.18) : Colors.transparent,
+            color:
+                selected ? accent.withValues(alpha: 0.18) : Colors.transparent,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Column(
             children: [
               _BadgedIcon(
                 icon: selected ? tab.selectedIcon : tab.icon,
-                color: selected ? _teal : _slate400,
+                color: selected ? accent : _slate400,
                 badge: badge,
               ),
               const SizedBox(height: 4),
@@ -239,106 +246,8 @@ class _RailItem extends StatelessWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Compact layout — floating bottom bar
-// ───────────────────────────────────────────────────────────────────────────
-
-class _DoctorBottomBar extends ConsumerWidget {
-  final int index;
-  final ValueChanged<int> onSelect;
-  const _DoctorBottomBar({required this.index, required this.onSelect});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final pendingTriage = ref.watch(pendingTriageCountProvider);
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        14, 0, 14, 12 + MediaQuery.viewPaddingOf(context).bottom,
-      ),
-      child: Container(
-        decoration: BoxDecoration(
-          color: _slate,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: _slate.withValues(alpha: 0.35),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            for (final tab in DoctorTab.values)
-              _BottomItem(
-                tab: tab,
-                selected: tab.index == index,
-                badge: tab == DoctorTab.appointments ? pendingTriage : 0,
-                onTap: () => onSelect(tab.index),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BottomItem extends StatelessWidget {
-  final DoctorTab tab;
-  final bool selected;
-  final int badge;
-  final VoidCallback onTap;
-
-  const _BottomItem({
-    required this.tab,
-    required this.selected,
-    required this.badge,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? _teal : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _BadgedIcon(
-                icon: selected ? tab.selectedIcon : tab.icon,
-                color: selected ? Colors.white : _slate400,
-                badge: badge,
-              ),
-              if (selected) ...[
-                const SizedBox(height: 3),
-                Text(
-                  tab.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: MtTextStyles.labelSm
-                      .copyWith(color: Colors.white, fontSize: 9),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Shared icon + count-badge stack used by both nav surfaces.
+/// Icon + count-badge stack used by the wide-layout rail (the compact layout
+/// uses [CustomFloatingNavBar], which renders its own badge).
 class _BadgedIcon extends StatelessWidget {
   final IconData icon;
   final Color color;
@@ -400,11 +309,12 @@ class _DoctorHeader extends ConsumerWidget {
     final title = name.startsWith('Dr.') ? name : 'Dr. $firstName';
     final specialization = (user?.specialization ?? '').trim();
 
+    final c = context.appColors;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: MtColors.line)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(bottom: BorderSide(color: c.cardBorder)),
       ),
       child: Row(
         children: [
@@ -423,8 +333,8 @@ class _DoctorHeader extends ConsumerWidget {
             child: InitialsAvatar(
               name: firstName,
               size: 44,
-              backgroundColor: _tealSoft,
-              textColor: _teal,
+              backgroundColor: c.accent.withValues(alpha: 0.12),
+              textColor: c.accent,
             ),
           ),
           const SizedBox(width: 12),
@@ -439,7 +349,7 @@ class _DoctorHeader extends ConsumerWidget {
                         title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: MtTextStyles.h3.copyWith(color: MtColors.ink),
+                        style: MtTextStyles.h3.copyWith(color: c.title),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -453,7 +363,7 @@ class _DoctorHeader extends ConsumerWidget {
                       : specialization,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                  style: MtTextStyles.bodySm.copyWith(color: c.body),
                 ),
               ],
             ),
@@ -462,7 +372,7 @@ class _DoctorHeader extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: online ? _onlineGreenSoft : MtColors.bg,
+              color: online ? c.positiveBg : c.surfaceHi,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
@@ -472,7 +382,7 @@ class _DoctorHeader extends ConsumerWidget {
                   width: 7,
                   height: 7,
                   decoration: BoxDecoration(
-                    color: online ? _onlineGreen : MtColors.ink3,
+                    color: online ? c.positive : c.muted,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -480,7 +390,7 @@ class _DoctorHeader extends ConsumerWidget {
                 Text(
                   online ? 'On duty' : 'Off duty',
                   style: MtTextStyles.labelSm.copyWith(
-                    color: online ? _onlineGreen : MtColors.ink3,
+                    color: online ? c.positive : c.muted,
                   ),
                 ),
               ],
@@ -500,8 +410,9 @@ class _BmdcTag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = verified ? _teal : const Color(0xFFB45309);
-    final bg = verified ? _tealSoft : const Color(0xFFFEF3C7);
+    final c = context.appColors;
+    final fg = verified ? c.accent : c.warning;
+    final bg = verified ? c.accent.withValues(alpha: 0.12) : c.warningBg;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -559,7 +470,7 @@ class _ActiveCallBannerState extends State<_ActiveCallBanner>
 
   @override
   Widget build(BuildContext context) {
-    final accent = widget.alert.urgent ? _coral : _teal;
+    final accent = widget.alert.urgent ? _coral : context.appColors.accent;
     return AnimatedBuilder(
       animation: _ctrl,
       builder: (context, child) {
@@ -714,13 +625,14 @@ class _SegmentBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 4),
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: MtColors.bg,
+        color: c.surfaceHi,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: c.cardBorder),
       ),
       child: Row(
         children: [
@@ -760,6 +672,7 @@ class _SegmentPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Expanded(
       child: InkWell(
         onTap: onTap,
@@ -768,19 +681,18 @@ class _SegmentPill extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? _teal : Colors.transparent,
+            color: selected ? c.accent : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon,
-                  size: 16, color: selected ? Colors.white : MtColors.ink2),
+              Icon(icon, size: 16, color: selected ? c.onAccent : c.body),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: MtTextStyles.labelMd.copyWith(
-                  color: selected ? Colors.white : MtColors.ink2,
+                  color: selected ? c.onAccent : c.body,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -790,13 +702,13 @@ class _SegmentPill extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                   decoration: BoxDecoration(
-                    color: selected ? Colors.white : _coral,
+                    color: selected ? c.onAccent : c.danger,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     '$badge',
                     style: MtTextStyles.labelSm.copyWith(
-                      color: selected ? _teal : Colors.white,
+                      color: selected ? c.accent : c.onAccent,
                       fontSize: 10,
                       fontWeight: FontWeight.w800,
                     ),
@@ -816,6 +728,7 @@ class _TeleConsultsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -826,21 +739,20 @@ class _TeleConsultsView extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: _tealSoft,
+                color: c.accent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Icon(Icons.videocam_outlined,
-                  color: _teal, size: 30),
+              child: Icon(Icons.videocam_outlined, color: c.accent, size: 30),
             ),
             const SizedBox(height: 16),
             Text('No virtual consults scheduled',
-                style: MtTextStyles.h3.copyWith(color: MtColors.ink)),
+                style: MtTextStyles.h3.copyWith(color: c.title)),
             const SizedBox(height: 6),
             Text(
               'Open the Schedule tab to publish bookable tele-consult '
               'windows — confirmed video appointments will appear here.',
               textAlign: TextAlign.center,
-              style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+              style: MtTextStyles.bodySm.copyWith(color: c.muted),
             ),
           ],
         ),
@@ -860,8 +772,9 @@ class SmartPrescriberPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(doctorDashboardProvider);
     return async.when(
-      loading: () =>
-          const Center(child: CircularProgressIndicator(color: _teal)),
+      loading: () => Center(
+          child:
+              CircularProgressIndicator(color: context.appColors.accent)),
       error: (e, _) => _PanelMessage(
         icon: Icons.error_outline,
         title: "Couldn't load visits",
@@ -908,20 +821,21 @@ class _PrescribeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final a = appointment;
+    final c = context.appColors;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: c.cardBorder),
       ),
       child: Row(
         children: [
           InitialsAvatar(
             name: a.patientName,
             size: 44,
-            backgroundColor: _tealSoft,
-            textColor: _teal,
+            backgroundColor: c.accent.withValues(alpha: 0.12),
+            textColor: c.accent,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -932,13 +846,12 @@ class _PrescribeCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: MtTextStyles.labelLg.copyWith(
-                        color: MtColors.ink, fontWeight: FontWeight.w700)),
+                        color: c.title, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
                 Text(a.serviceName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        MtTextStyles.bodySm.copyWith(color: MtColors.ink2)),
+                    style: MtTextStyles.bodySm.copyWith(color: c.body)),
               ],
             ),
           ),
@@ -956,10 +869,10 @@ class _PrescribeCard extends StatelessWidget {
             ),
             icon: const Icon(Icons.edit_note_rounded, size: 18),
             label: Text('Prescribe',
-                style: MtTextStyles.labelMd.copyWith(color: Colors.white)),
+                style: MtTextStyles.labelMd.copyWith(color: c.onAccent)),
             style: ElevatedButton.styleFrom(
-              backgroundColor: _teal,
-              foregroundColor: Colors.white,
+              backgroundColor: c.accent,
+              foregroundColor: c.onAccent,
               elevation: 0,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
@@ -1013,6 +926,7 @@ class _ScheduleSlotsPanelState extends ConsumerState<ScheduleSlotsPanel> {
     final availability = ref.watch(doctorAvailabilityProvider);
     final online = availability.valueOrNull ?? true;
     final busy = availability.isLoading;
+    final c = context.appColors;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
@@ -1028,9 +942,9 @@ class _ScheduleSlotsPanelState extends ConsumerState<ScheduleSlotsPanel> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: MtColors.surface,
+            color: c.surface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: MtColors.line),
+            border: Border.all(color: c.cardBorder),
           ),
           child: Row(
             children: [
@@ -1038,11 +952,11 @@ class _ScheduleSlotsPanelState extends ConsumerState<ScheduleSlotsPanel> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: online ? _onlineGreenSoft : MtColors.bg,
+                  color: online ? c.positiveBg : c.surfaceHi,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(online ? Icons.bolt : Icons.bolt_outlined,
-                    color: online ? _onlineGreen : MtColors.ink3, size: 20),
+                    color: online ? c.positive : c.muted, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1051,21 +965,20 @@ class _ScheduleSlotsPanelState extends ConsumerState<ScheduleSlotsPanel> {
                   children: [
                     Text(online ? 'On duty' : 'Off duty',
                         style: MtTextStyles.labelLg.copyWith(
-                            color: MtColors.ink, fontWeight: FontWeight.w700)),
+                            color: c.title, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 2),
                     Text(
                       online
                           ? 'Discoverable for new dispatches & consults'
                           : 'Hidden from the matching system',
-                      style:
-                          MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+                      style: MtTextStyles.bodySm.copyWith(color: c.muted),
                     ),
                   ],
                 ),
               ),
               Switch.adaptive(
                 value: online,
-                activeThumbColor: _onlineGreen,
+                activeThumbColor: c.positive,
                 onChanged: busy
                     ? null
                     : (_) =>
@@ -1079,13 +992,13 @@ class _ScheduleSlotsPanelState extends ConsumerState<ScheduleSlotsPanel> {
           children: [
             Text('BOOKABLE TELE-CONSULT SLOTS',
                 style: MtTextStyles.sectionLabel
-                    .copyWith(color: MtColors.ink3, letterSpacing: 1.0)),
+                    .copyWith(color: c.muted, letterSpacing: 1.0)),
             const Spacer(),
             TextButton.icon(
               onPressed: _addSlot,
               icon: const Icon(Icons.add, size: 16),
               label: Text('Add slot', style: MtTextStyles.labelMd),
-              style: TextButton.styleFrom(foregroundColor: _teal),
+              style: TextButton.styleFrom(foregroundColor: c.accent),
             ),
           ],
         ),
@@ -1094,9 +1007,9 @@ class _ScheduleSlotsPanelState extends ConsumerState<ScheduleSlotsPanel> {
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: MtColors.surface,
+            color: c.surface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: MtColors.line),
+            border: Border.all(color: c.cardBorder),
           ),
           child: _slots.isEmpty
               ? Padding(
@@ -1104,7 +1017,7 @@ class _ScheduleSlotsPanelState extends ConsumerState<ScheduleSlotsPanel> {
                   child: Text(
                     'No slots published yet — tap “Add slot” to open a '
                     'consult window.',
-                    style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+                    style: MtTextStyles.bodySm.copyWith(color: c.muted),
                   ),
                 )
               : Wrap(
@@ -1131,27 +1044,28 @@ class _SlotChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 7, 6, 7),
       decoration: BoxDecoration(
-        color: _tealSoft,
+        color: c.accent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.schedule, size: 14, color: _teal),
+          Icon(Icons.schedule, size: 14, color: c.accent),
           const SizedBox(width: 6),
           Text(label,
               style: MtTextStyles.labelMd.copyWith(
-                  color: _teal, fontWeight: FontWeight.w700)),
+                  color: c.accent, fontWeight: FontWeight.w700)),
           const SizedBox(width: 2),
           InkWell(
             onTap: onRemove,
             borderRadius: BorderRadius.circular(10),
-            child: const Padding(
-              padding: EdgeInsets.all(2),
-              child: Icon(Icons.close, size: 14, color: _teal),
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: Icon(Icons.close, size: 14, color: c.accent),
             ),
           ),
         ],
@@ -1176,6 +1090,7 @@ class _PanelHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1183,10 +1098,10 @@ class _PanelHeader extends StatelessWidget {
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: _tealSoft,
+            color: c.accent.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: _teal, size: 20),
+          child: Icon(icon, color: c.accent, size: 20),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -1194,11 +1109,11 @@ class _PanelHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(title,
-                  style: MtTextStyles.h2
-                      .copyWith(color: MtColors.ink, fontSize: 20)),
+                  style:
+                      MtTextStyles.h2.copyWith(color: c.title, fontSize: 20)),
               const SizedBox(height: 2),
               Text(subtitle,
-                  style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3)),
+                  style: MtTextStyles.bodySm.copyWith(color: c.muted)),
             ],
           ),
         ),
@@ -1219,25 +1134,26 @@ class _PanelMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: c.cardBorder),
       ),
       child: Column(
         children: [
-          Icon(icon, size: 36, color: MtColors.ink3),
+          Icon(icon, size: 36, color: c.muted),
           const SizedBox(height: 10),
           Text(title,
               textAlign: TextAlign.center,
-              style: MtTextStyles.h3.copyWith(color: MtColors.ink)),
+              style: MtTextStyles.h3.copyWith(color: c.title)),
           const SizedBox(height: 4),
           Text(subtitle,
               textAlign: TextAlign.center,
-              style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3)),
+              style: MtTextStyles.bodySm.copyWith(color: c.muted)),
         ],
       ),
     );

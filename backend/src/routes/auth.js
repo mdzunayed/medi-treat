@@ -292,7 +292,7 @@ router.post('/login', async (req, res) => {
         }
         return res.status(401).json({
         success: false,
-        message: 'Invalid phone number or password',
+        message: 'Incorrect mobile number or password. Please try again.',
       });
       }
     } else {
@@ -300,7 +300,7 @@ router.post('/login', async (req, res) => {
       if (!account) {
         return res.status(401).json({
         success: false,
-        message: 'Invalid phone number or password',
+        message: 'Incorrect mobile number or password. Please try again.',
       });
       }
     }
@@ -324,7 +324,7 @@ router.post('/login', async (req, res) => {
     if (!ok) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid phone number or password',
+        message: 'Incorrect mobile number or password. Please try again.',
       });
     }
 
@@ -489,16 +489,25 @@ router.post('/google', async (req, res) => {
 });
 
 // POST /auth/refresh  { refreshToken }
+//
+// SECURITY TODO: this stub accepts ANY non-empty refresh token and mints
+// fresh tokens without validating or rotating it against the account.
+// Real issuance/verification (persist refresh tokens, reject unknown ones
+// with 401) is tracked as a separate auth change.
 router.post('/refresh', async (req, res) => {
-  const { refreshToken } = req.body || {};
-  if (!refreshToken) {
-    return res.status(401).json({ message: 'Missing refresh token' });
+  try {
+    const { refreshToken } = req.body || {};
+    if (!refreshToken) {
+      return res.status(401).json({ message: 'Missing refresh token' });
+    }
+    // Stub: re-issue a refresh token. Real rotation lives behind the
+    // forthcoming /auth/refresh-rotation endpoint. The access token
+    // itself is intentionally not re-signed here — the client should
+    // call /auth/login again to pick up a fresh JWT.
+    res.json({ token: newToken(), refreshToken: newToken() });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Server error' });
   }
-  // Stub: re-issue a refresh token. Real rotation lives behind the
-  // forthcoming /auth/refresh-rotation endpoint. The access token
-  // itself is intentionally not re-signed here — the client should
-  // call /auth/login again to pick up a fresh JWT.
-  res.json({ token: newToken(), refreshToken: newToken() });
 });
 
 // POST /auth/complete-password-reset  { newPassword }

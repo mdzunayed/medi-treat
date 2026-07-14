@@ -1,5 +1,7 @@
 import 'package:equatable/equatable.dart';
 
+import 'assigned_doctor.dart';
+
 /// Three canonical timing slots a prescription line item can be
 /// scheduled for. Mirrors the backend `FrequencySlotSchema`.
 enum DoseSlot { morning, afternoon, night }
@@ -123,6 +125,16 @@ class PrescriptionItem extends Equatable {
     this.notes = '',
   });
 
+  /// Bangladeshi-pharmacy shorthand for the daily schedule, e.g. a
+  /// morning + night script reads `1+0+1`. Order is always
+  /// morning + afternoon + night.
+  String get frequencyCode {
+    String bit(DoseSlot s) => frequency.contains(s) ? '1' : '0';
+    return '${bit(DoseSlot.morning)}+'
+        '${bit(DoseSlot.afternoon)}+'
+        '${bit(DoseSlot.night)}';
+  }
+
   PrescriptionItem copyWith({
     String? drugName,
     String? dosage,
@@ -216,6 +228,11 @@ class DoseLogEntry extends Equatable {
   }
 }
 
+/// Lifecycle bucket derived from `issued_at` + the longest item
+/// duration. Mirrors the backend's `my-active` window filter so the
+/// Medications hub can badge each card without another round-trip.
+enum PrescriptionStatus { active, completed }
+
 class Prescription extends Equatable {
   final String id;
   final String appointmentId;
@@ -227,8 +244,16 @@ class Prescription extends Equatable {
   final List<PrescriptionItem> items;
   final List<DoseLogEntry> doseLog;
 
-  /// Verified-credential block, only populated by the single-prescription
-  /// detail fetch (`GET /api/prescriptions/:id`). Empty on list responses.
+  /// Full public profile of the issuing doctor (photo, specialization,
+  /// hospital affiliation, BMDC licence, verified flag). Populated by
+  /// every prescription read endpoint since the doctor-block
+  /// enrichment landed server-side; `null` when the provider row could
+  /// not be resolved — the UI falls back to [doctorName] + initials.
+  final AssignedDoctor? doctor;
+
+  /// Flat convenience mirrors of the credential fields inside
+  /// [doctor], kept so older call sites (vault detail card) don't have
+  /// to null-chase the nested block.
   final String doctorBmdc;
   final String doctorSpecialization;
   final bool doctorVerified;
@@ -247,11 +272,27 @@ class Prescription extends Equatable {
     required this.items,
     this.doctorAccountId = '',
     this.doseLog = const [],
+    this.doctor,
     this.doctorBmdc = '',
     this.doctorSpecialization = '',
     this.doctorVerified = false,
     this.symptoms = '',
   });
+
+  /// Longest calendar window across all line items — the whole script
+  /// stays "active" until every course has run out.
+  int get maxDurationDays => items.fold(
+      0, (m, it) => it.durationDays > m ? it.durationDays : m);
+
+  /// Calendar day the last course lapses.
+  DateTime get endsAt => issuedAt.add(Duration(days: maxDurationDays));
+
+  /// Active vs Completed, matching the backend `my-active` window
+  /// filter (a zero-duration script is treated as open-ended).
+  PrescriptionStatus get status =>
+      maxDurationDays <= 0 || !DateTime.now().isAfter(endsAt)
+          ? PrescriptionStatus.active
+          : PrescriptionStatus.completed;
 
   @override
   List<Object?> get props => [
@@ -264,6 +305,7 @@ class Prescription extends Equatable {
         issuedAt,
         items,
         doseLog,
+        doctor,
         doctorBmdc,
         doctorSpecialization,
         doctorVerified,
@@ -316,6 +358,7 @@ class Prescription extends Equatable {
         for (final r in rawLog)
           if (r is Map) DoseLogEntry.fromJson(Map<String, dynamic>.from(r)),
       ],
+      doctor: doctor.isEmpty ? null : AssignedDoctor.fromJson(doctor),
       doctorBmdc: (doctor['bmdc_license'] ?? '').toString(),
       doctorSpecialization: (doctor['specialization'] ?? '').toString(),
       doctorVerified: (doctor['is_verified_doctor'] as bool?) ?? false,

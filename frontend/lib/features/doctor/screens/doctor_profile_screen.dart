@@ -471,7 +471,7 @@ class _VerifiedBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Verified by Medi-Treat',
+      message: 'Verified by Taafi',
       child: Container(
         width: 18,
         height: 18,

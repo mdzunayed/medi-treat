@@ -121,7 +121,7 @@ String _buildLedgerHtml(List<AdminCareRequest> rows, DateTimeRange? range) {
 
   return '''
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Medi-Treat — Ledger Summary</title>
+<html><head><meta charset="utf-8"><title>Taafi — Ledger Summary</title>
 <style>
   * { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
   body { color: #0F172A; margin: 32px; }
@@ -142,7 +142,7 @@ String _buildLedgerHtml(List<AdminCareRequest> rows, DateTimeRange? range) {
 </style></head>
 <body>
   <div class="head">
-    <div><h1>Medi-Treat — Ledger Summary</h1>
+    <div><h1>Taafi — Ledger Summary</h1>
       <div class="muted">Period: $period</div></div>
     <div class="muted">Generated $generated</div>
   </div>

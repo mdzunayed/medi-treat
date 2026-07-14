@@ -20,18 +20,39 @@ class ServiceCatalogRepository {
 
   List<ServiceCatalogItem> _cache = const [];
 
+  /// The failure from the constructor-time fetch, if it happened before any
+  /// watcher subscribed. Broadcast controllers drop events with no listener,
+  /// so without replaying this in [watchAll]/[watchActive] a boot-time
+  /// failure surfaces as a silently-empty catalog instead of an error state.
+  Object? _initialError;
+
   ServiceCatalogRepository(this._dio) {
-    // Kick off an initial fetch so subscribers don't sit empty.
-    refresh();
+    // Kick off an initial fetch so subscribers don't sit empty. Fire-and-
+    // forget must swallow the rejection: refresh() rethrows, and an
+    // unawaited throw here becomes an uncaught async error at app boot
+    // whenever the backend is unreachable (the same defect
+    // PromoBannerRepository already guards against). The failure is kept in
+    // [_initialError] for the watchers to replay.
+    unawaited(refresh().catchError((_) => const <ServiceCatalogItem>[]));
   }
 
   Stream<List<ServiceCatalogItem>> watchAll() async* {
-    yield _cache;
+    final initialError = _initialError;
+    if (initialError != null && _cache.isEmpty) {
+      yield* Stream<List<ServiceCatalogItem>>.error(initialError);
+    } else {
+      yield _cache;
+    }
     yield* _allCtrl.stream;
   }
 
   Stream<List<ServiceCatalogItem>> watchActive() async* {
-    yield _cache.where((s) => s.isActive).toList();
+    final initialError = _initialError;
+    if (initialError != null && _cache.isEmpty) {
+      yield* Stream<List<ServiceCatalogItem>>.error(initialError);
+    } else {
+      yield _cache.where((s) => s.isActive).toList();
+    }
     yield* _activeCtrl.stream;
   }
 
@@ -42,9 +63,11 @@ class ServiceCatalogRepository {
           .map((e) => ServiceCatalogItem.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
       _cache = list;
+      _initialError = null;
       _broadcast();
       return list;
     } on DioException catch (e) {
+      if (_cache.isEmpty) _initialError = _toMessage(e);
       _allCtrl.addError(_toMessage(e));
       _activeCtrl.addError(_toMessage(e));
       rethrow;

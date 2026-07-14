@@ -3,7 +3,7 @@
 #
 # Services & ports:
 #   api            -> http://localhost:4000   (Express + Mongoose)
-#   mongo          -> mongodb://localhost:27018/medi_treat
+#   mongo          -> mongodb://localhost:27018/taafi
 #                     (host port 27018 → container 27017; offset avoids a clash
 #                      with any standalone mongo you may already run on 27017)
 #   mongo-express  -> http://localhost:8081   (browse the DB in a browser)
@@ -18,7 +18,7 @@
 services:
   mongo:
     image: mongo:7
-    container_name: meditreat-mongo
+    container_name: taafi-mongo
     restart: unless-stopped
     ports:
       - "27018:27017"
@@ -32,14 +32,14 @@ services:
 
   api:
     build: .
-    container_name: meditreat-api
+    container_name: taafi-api
     restart: unless-stopped
     depends_on:
       mongo:
         condition: service_healthy
     environment:
       PORT: 4000
-      MONGO_URI: mongodb://mongo:27017/medi_treat   # underscore, matches seed.js + server.js defaults
+      MONGO_URI: mongodb://mongo:27017/taafi   # underscore, matches seed.js + server.js defaults
       UPLOAD_DIR: /app/uploads
       PUBLIC_BASE_URL: http://localhost:4000
     ports:
@@ -49,7 +49,7 @@ services:
 
   mongo-express:
     image: mongo-express:1
-    container_name: meditreat-mongo-express
+    container_name: taafi-mongo-express
     restart: unless-stopped
     depends_on:
       mongo:

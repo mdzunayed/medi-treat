@@ -132,12 +132,19 @@ class OverviewTab extends ConsumerWidget {
                       : MtColors.ink3,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  'High Urgency Only',
-                  style: MtTextStyles.labelMd.copyWith(
-                    color: filter.urgencyOnly
-                        ? MtColors.rejected
-                        : MtColors.ink2,
+                // Flexible so the label shrinks/ellipsizes instead of forcing
+                // the min-width Row past a tight parent (the `w<=148` overflow).
+                Flexible(
+                  child: Text(
+                    'High Urgency Only',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    style: MtTextStyles.labelMd.copyWith(
+                      color: filter.urgencyOnly
+                          ? MtColors.rejected
+                          : MtColors.ink2,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),

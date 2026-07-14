@@ -1,15 +1,28 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/dio_client.dart';
 import '../../core/models/user.dart';
+import '../../core/storage/app_prefs.dart';
 
 final dioClientProvider = Provider<DioClient>((ref) {
-  return DioClient();
+  // Hand the provider ref to the client so its request interceptor can read
+  // the live auth-state token (see DioClient's onRequest). The read is lazy
+  // (at request time), so there's no build-time cycle with authTokenProvider.
+  return DioClient(ref);
 });
 
 final authTokenProvider =
     StateNotifierProvider<AuthNotifier, AsyncValue<AuthToken?>>((ref) {
   final dioClient = ref.watch(dioClientProvider);
-  return AuthNotifier(dioClient);
+  final notifier = AuthNotifier(dioClient);
+  // Session-expiry bridge. The Dio interceptor can't touch this provider
+  // (startup dependency cycle — see tokenProvider's doc), so on an
+  // unrecoverable 401 it bumps the [sessionExpiredProvider] leaf instead.
+  // Flushing the state here is what actually wakes the router redirect and
+  // bounces the user to /login; tokens are already cleared by DioClient.
+  ref.listen<int>(sessionExpiredProvider, (previous, next) {
+    if (previous != null && next != previous) notifier.sessionExpired();
+  });
+  return notifier;
 });
 
 class AuthNotifier extends StateNotifier<AsyncValue<AuthToken?>> {
@@ -112,6 +125,15 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthToken?>> {
 
   Future<void> logout() async {
     await _dioClient.clearTokens();
+    state = const AsyncValue.data(null);
+  }
+
+  /// Invoked (via the [sessionExpiredProvider] listener) when the Dio 401
+  /// interceptor declared the session unrecoverable. DioClient has already
+  /// cleared the persisted tokens — this only flushes the in-memory auth
+  /// state so `currentUserProvider` goes null and the router redirects to
+  /// /login.
+  void sessionExpired() {
     state = const AsyncValue.data(null);
   }
 }

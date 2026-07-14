@@ -5,7 +5,7 @@ const CareRequest = require('../models/CareRequest');
 const { requireAccountId } = require('../middleware/auth');
 const { safeEmitNotification } = require('../services/notificationService');
 const { sendHighPriorityPush } = require('../services/fcmService');
-const { loadProviderPair } = require('../utils/doctorView');
+const { loadProviderPair, buildDoctorView } = require('../utils/doctorView');
 
 const router = express.Router();
 
@@ -62,6 +62,38 @@ function normaliseItem(raw, idx) {
   out.duration_days = Math.floor(dur);
   out.notes = (raw?.notes ?? '').toString().trim().slice(0, 500);
   return out;
+}
+
+/**
+ * Serialize a batch of prescriptions with each row's issuing doctor
+ * resolved into a full public `doctor` block (photo, specialization,
+ * hospital affiliation, BMDC licence, verified flag, …). The patient's
+ * Medications hub renders the doctor header card straight off this
+ * block. One provider lookup per distinct doctor, ran in parallel;
+ * best-effort — a busted provider row simply omits the block.
+ */
+async function withDoctorBlocks(docs) {
+  const ids = [
+    ...new Set(docs.map((d) => d.doctor_account_id).filter(Boolean)),
+  ];
+  const views = new Map();
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const pair = await loadProviderPair(id, 'doctor');
+        const view = buildDoctorView(pair);
+        if (view) views.set(id, view);
+      } catch (_) {
+        /* credential join is non-fatal */
+      }
+    }),
+  );
+  return docs.map((d) => {
+    const out = d.toJSON();
+    const view = views.get(d.doctor_account_id);
+    if (view) out.doctor = view;
+    return out;
+  });
 }
 
 // POST /api/prescriptions
@@ -254,7 +286,7 @@ router.get('/my-active', requireAccountId, async (req, res) => {
     });
     res.json({
       success: true,
-      prescriptions: active.map((p) => p.toJSON()),
+      prescriptions: await withDoctorBlocks(active),
     });
   } catch (err) {
     res
@@ -284,7 +316,7 @@ router.get('/by-patient/:accountId', requireAccountId, async (req, res) => {
     }).sort({ issued_at: -1 });
     res.json({
       success: true,
-      prescriptions: rows.map((p) => p.toJSON()),
+      prescriptions: await withDoctorBlocks(rows),
     });
   } catch (err) {
     res
@@ -319,30 +351,11 @@ router.get('/:id', requireAccountId, async (req, res) => {
     }
 
     // Enrich for the patient's prescription vault: resolve the issuing
-    // doctor's verified credentials (BMDC reg + specialty) and surface the
-    // originating visit's reported condition as "symptoms". Best-effort —
-    // the script still returns even if the joins miss.
-    const out = doc.toJSON();
-    try {
-      if (doc.doctor_account_id) {
-        const { provider } = await loadProviderPair(
-          doc.doctor_account_id,
-          'doctor',
-        );
-        if (provider) {
-          out.doctor = {
-            full_name: provider.full_name || doc.doctor_name || '',
-            bmdc_license: provider.bmdc_license || '',
-            specialization: provider.specialization || '',
-            is_verified_doctor:
-              provider.is_verified_doctor === true ||
-              provider.verification_status === 'verified',
-          };
-        }
-      }
-    } catch (_) {
-      /* credential join is non-fatal */
-    }
+    // doctor into the full public profile block (credentials + photo +
+    // affiliation) and surface the originating visit's reported condition
+    // as "symptoms". Best-effort — the script still returns even if the
+    // joins miss.
+    const [out] = await withDoctorBlocks([doc]);
     try {
       if (doc.appointment_id) {
         const appt = await CareRequest.findById(doc.appointment_id).lean();
