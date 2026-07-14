@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const CareRequest = require('../models/CareRequest');
 const Provider = require('../models/Provider');
 const Account = require('../models/Account');
+const { roundMoney } = require('../utils/money');
 
 const BCRYPT_ROUNDS = 10;
 
@@ -38,7 +39,7 @@ function firstRevenue(facetArr) {
     return { revenue: 0, visits: 0 };
   }
   return {
-    revenue: Number(facetArr[0].revenue) || 0,
+    revenue: roundMoney(Number(facetArr[0].revenue) || 0),
     visits: Number(facetArr[0].visits) || 0,
   };
 }

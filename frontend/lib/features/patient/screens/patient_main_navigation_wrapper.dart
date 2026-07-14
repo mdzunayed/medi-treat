@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/mt_colors.dart';
+import '../../navigation/presentation/widgets/custom_floating_navbar.dart';
 import '../navigation/patient_nav_provider.dart';
+import '../widgets/app_open_ad_interstitial.dart';
 import 'new_request_tab.dart';
 import 'patient_account_screen.dart';
 import 'patient_activities_screen.dart';
 import 'patient_home_screen.dart';
-import 'widgets/fluid_nav_bar.dart';
-import 'widgets/patient_home_palette.dart';
 
 /// Root navigation shell for the patient app. The router mounts this
 /// widget at `/patient/:name`; it owns the [Scaffold], the
@@ -38,9 +37,27 @@ class PatientMainNavigationWrapper extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentIndex = ref.watch(patientNavProvider);
+    final canvas = Theme.of(context).scaffoldBackgroundColor;
 
+    // The interstitial sits ABOVE the whole Scaffold (nav bar included) so
+    // an active app-open ad intercepts the first frame after launch; once
+    // its countdown ends it latches itself off for the rest of the session.
+    return Stack(
+      children: [
+        _buildShell(context, ref, currentIndex, canvas),
+        const AppOpenAdInterstitial(),
+      ],
+    );
+  }
+
+  Widget _buildShell(
+    BuildContext context,
+    WidgetRef ref,
+    int currentIndex,
+    Color canvas,
+  ) {
     return Scaffold(
-      backgroundColor: MtColors.bg,
+      backgroundColor: canvas,
       // 1. Maintain screen state and render the actual complete sub-screens.
       body: IndexedStack(
         index: currentIndex,
@@ -51,55 +68,45 @@ class PatientMainNavigationWrapper extends ConsumerWidget {
           PatientAccountScreen(),    // Index 3: Profile / account settings
         ],
       ),
-      // 2. Custom fluid notched tray with the floating orange pill. It
-      //    sits in the real `bottomNavigationBar` slot (not the body), so
-      //    it anchors to the absolute bottom edge and every tab's own
-      //    layout — including the New Request screen's bottom submit bar —
-      //    stays intact. The transparent band above the painted bar (where
-      //    the pill rides) shows the cream Scaffold canvas, matching the
-      //    design language. Width is capped on wide viewports.
-      // A deep-canvas backdrop fills the whole bottom region (the nav bar's
-      // transparent top inset + the bottom safe-area inset) so the dark tray
-      // meets the dark Home body seamlessly — no light Scaffold line showing
-      // through. Scoped here rather than on `Scaffold.backgroundColor`, which
-      // would darken the still-light New Request tab (it has no Scaffold).
+      // 2. The floating capsule tray sits in the real `bottomNavigationBar`
+      //    slot (not the body), so it anchors to the absolute bottom edge and
+      //    every tab's own layout — including the New Request screen's bottom
+      //    submit bar — stays intact. SafeArea, side margins and the wide-
+      //    viewport width cap all live inside [CustomFloatingNavBar].
+      // A canvas backdrop fills the whole bottom region (the band around the
+      // floating pill + the bottom safe-area inset) so the tray meets the
+      // body seamlessly in both themes — no mismatched Scaffold line showing
+      // through. Uses the same theme canvas as the scaffold above.
+      //
+      // Only the three primary destinations live in the tray. The Account
+      // destination is still mounted in the [IndexedStack] (index 3) and is
+      // reached from the Home header avatar via `ref.goToAccount()` — so its
+      // lifecycle is identical, it just no longer occupies a bottom-nav slot.
+      // The bar renders with no active circle while the account screen is
+      // showing.
       bottomNavigationBar: ColoredBox(
-        color: HomeDark.canvas,
-        child: SafeArea(
-        top: false,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            const double cap = 600;
-            final double sidePad = constraints.maxWidth > cap
-                ? (constraints.maxWidth - cap) / 2
-                : 0;
-            return Padding(
-              padding: EdgeInsets.symmetric(horizontal: sidePad),
-              // Only the three primary destinations live in the tray. The
-              // Account destination is still mounted in the [IndexedStack]
-              // (index 3) and is reached from the Home header avatar via
-              // `ref.goToAccount()` — so its lifecycle is identical, it just
-              // no longer occupies a bottom-nav slot. The bar renders with no
-              // active pill while the account screen is showing.
-              child: FluidNavBar(
-                currentIndex: currentIndex,
-                onTap: (index) =>
-                    ref.read(patientNavProvider.notifier).changeTab(index),
-                items: const [
-                  FluidNavItem(icon: Icons.home_rounded, label: 'Home'),
-                  FluidNavItem(
-                    icon: Icons.add_circle_outline_rounded,
-                    label: 'New Request',
-                  ),
-                  FluidNavItem(
-                    icon: Icons.analytics_outlined,
-                    label: 'Activities',
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
+        color: canvas,
+        child: CustomFloatingNavBar(
+          currentIndex: currentIndex,
+          onTap: (index) =>
+              ref.read(patientNavProvider.notifier).changeTab(index),
+          items: const [
+            FloatingNavItem(
+              icon: Icons.home_outlined,
+              activeIcon: Icons.home_rounded,
+              label: 'Home',
+            ),
+            FloatingNavItem(
+              icon: Icons.add_circle_outline_rounded,
+              activeIcon: Icons.add_circle_rounded,
+              label: 'New Request',
+            ),
+            FloatingNavItem(
+              icon: Icons.analytics_outlined,
+              activeIcon: Icons.analytics_rounded,
+              label: 'Activities',
+            ),
+          ],
         ),
       ),
     );

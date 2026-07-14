@@ -38,7 +38,7 @@ class _FaqScreenState extends State<FaqScreen> {
     final uri = Uri(
       scheme: 'mailto',
       path: SupportConfig.supportEmail,
-      queryParameters: {'subject': 'Medi-Treat support'},
+      queryParameters: {'subject': 'Taafi support'},
     );
     try {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);

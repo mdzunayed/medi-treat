@@ -29,7 +29,7 @@ import '../api/dio_client.dart';
 /// 3. Drop `GoogleService-Info.plist` into the iOS Runner target.
 /// 4. Register the top-level background handler (see blueprint) with
 ///    `@pragma('vm:entry-point')`.
-/// 5. Create the `medi_treat_high_priority` Android channel at
+/// 5. Create the `taafi_high_priority` Android channel at
 ///    `Importance.max` / `Priority.high` so background pushes slice
 ///    through battery-saver.
 /// 6. In [init], request permission, read the token, call
@@ -133,7 +133,7 @@ class NotificationService {
 // // 2. High-importance Android channel — pierces battery-saver.
 // const AndroidNotificationChannel highPriorityChannel =
 //     AndroidNotificationChannel(
-//   'medi_treat_high_priority',
+//   'taafi_high_priority',
 //   'Urgent care alerts',
 //   description: 'Dispatches, prescriptions, and live visit updates.',
 //   importance: Importance.max,

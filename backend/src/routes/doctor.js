@@ -5,6 +5,7 @@ const Provider = require('../models/Provider');
 const Account = require('../models/Account');
 const { maskPayoutInJSON } = require('../utils/payout');
 const { attachAccountId } = require('../middleware/auth');
+const { roundMoney } = require('../utils/money');
 
 const router = express.Router();
 
@@ -196,7 +197,7 @@ async function doctorEarnings(providerIds, start, end) {
   ]);
   if (!rows.length) return { earnings: 0, visits: 0 };
   return {
-    earnings: Number(rows[0].earnings) || 0,
+    earnings: roundMoney(Number(rows[0].earnings) || 0),
     visits: Number(rows[0].visits) || 0,
   };
 }
@@ -292,7 +293,7 @@ router.get('/dashboard', async (req, res) => {
 });
 
 // Hardcoded rating fallback for accounts that don't have a matching
-// providers row yet (e.g. the seeded `doctor@meditreat.app` Account
+// providers row yet (e.g. the seeded `doctor@taafi.app` Account
 // whose Provider doc lives under a different _id). Swap for a real
 // review aggregation once feedback ships.
 const DEFAULT_RATING = 4.8;

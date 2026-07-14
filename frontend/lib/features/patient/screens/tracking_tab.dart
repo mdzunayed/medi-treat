@@ -5,6 +5,7 @@ import '../../../core/api/patient_home_repository.dart';
 import '../../../core/models/assigned_doctor.dart';
 import '../../../core/models/patient_active_request.dart';
 import '../../../core/models/patient_request_status.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
@@ -320,9 +321,10 @@ class _BottomSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: c.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         boxShadow: [
           BoxShadow(
@@ -345,7 +347,7 @@ class _BottomSheet extends StatelessWidget {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: MtColors.line,
+                    color: c.cardBorder,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -357,14 +359,14 @@ class _BottomSheet extends StatelessWidget {
                   Text(
                     'SERVICE STATUS',
                     style: MtTextStyles.sectionLabel.copyWith(
-                      color: MtColors.brand,
+                      color: c.brand,
                       letterSpacing: 1.0,
                     ),
                   ),
                   if (request != null)
                     Text(
                       '#${request!.id.isNotEmpty ? request!.id.substring(request!.id.length > 6 ? request!.id.length - 6 : 0).toUpperCase() : 'MT-4827'}',
-                      style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+                      style: MtTextStyles.bodySm.copyWith(color: c.muted),
                     ),
                 ],
               ),
@@ -421,25 +423,26 @@ class _AssignedDoctorPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Your Doctor is Assigned',
-          style: MtTextStyles.h2.copyWith(color: MtColors.ink),
+          style: MtTextStyles.h2.copyWith(color: c.title),
         ),
         const SizedBox(height: 4),
         Text(
           "Tap View Profile to see credentials, or call directly when needed.",
-          style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+          style: MtTextStyles.bodyMd.copyWith(color: c.body),
         ),
         const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: MtColors.brandSofter,
+            color: c.brand.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: MtColors.brandSoft),
+            border: Border.all(color: c.brand.withValues(alpha: 0.25)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -460,16 +463,16 @@ class _AssignedDoctorPanel extends StatelessWidget {
                           child: Text(
                             _name,
                             style: MtTextStyles.labelLg
-                                .copyWith(color: MtColors.ink),
+                                .copyWith(color: c.title),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (doctor?.isVerifiedDoctor ?? false) ...[
                           const SizedBox(width: 6),
-                          const Icon(
+                          Icon(
                             Icons.verified,
                             size: 16,
-                            color: MtColors.brand,
+                            color: c.brand,
                           ),
                         ],
                       ],
@@ -478,24 +481,23 @@ class _AssignedDoctorPanel extends StatelessWidget {
                     if (_specialty.isNotEmpty)
                       Text(
                         _specialty,
-                        style: MtTextStyles.bodySm
-                            .copyWith(color: MtColors.ink2),
+                        style: MtTextStyles.bodySm.copyWith(color: c.body),
                         overflow: TextOverflow.ellipsis,
                       ),
                     const SizedBox(height: 6),
                     Row(
                       children: [
                         if (_rating != null) ...[
-                          const Icon(
+                          Icon(
                             Icons.star_rounded,
                             size: 14,
-                            color: Color(0xFFF59E0B),
+                            color: c.warning,
                           ),
                           const SizedBox(width: 2),
                           Text(
                             _rating!.toStringAsFixed(1),
                             style: MtTextStyles.bodySm
-                                .copyWith(color: MtColors.ink),
+                                .copyWith(color: c.title),
                           ),
                           const SizedBox(width: 10),
                         ],
@@ -503,7 +505,7 @@ class _AssignedDoctorPanel extends StatelessWidget {
                           Text(
                             '$_years yr exp',
                             style: MtTextStyles.bodySm
-                                .copyWith(color: MtColors.ink2),
+                                .copyWith(color: c.body),
                           ),
                       ],
                     ),
@@ -521,8 +523,8 @@ class _AssignedDoctorPanel extends StatelessWidget {
                 onPressed:
                     doctor == null ? null : () => _openProfile(context),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: MtColors.brand,
-                  side: const BorderSide(color: MtColors.brand),
+                  foregroundColor: c.brand,
+                  side: BorderSide(color: c.brand),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -551,6 +553,7 @@ class _DoctorThumbnail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     final url = photoUrl;
     Widget avatar;
     if (url != null && url.isNotEmpty) {
@@ -563,8 +566,8 @@ class _DoctorThumbnail extends StatelessWidget {
           errorBuilder: (_, _, _) => InitialsAvatar(
             name: fallbackName.replaceFirst(RegExp(r'^[Dd]r\.?\s+'), ''),
             size: 56,
-            backgroundColor: MtColors.brand,
-            textColor: Colors.white,
+            backgroundColor: c.brand,
+            textColor: c.onAccent,
           ),
         ),
       );
@@ -572,8 +575,8 @@ class _DoctorThumbnail extends StatelessWidget {
       avatar = InitialsAvatar(
         name: fallbackName.replaceFirst(RegExp(r'^[Dd]r\.?\s+'), ''),
         size: 56,
-        backgroundColor: MtColors.brand,
-        textColor: Colors.white,
+        backgroundColor: c.brand,
+        textColor: c.onAccent,
       );
     }
     if (!verified) return avatar;
@@ -587,13 +590,13 @@ class _DoctorThumbnail extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
-              color: MtColors.surface,
+              color: c.surface,
               shape: BoxShape.circle,
             ),
-            child: const Icon(
+            child: Icon(
               Icons.verified,
               size: 14,
-              color: MtColors.brand,
+              color: c.brand,
             ),
           ),
         ),
@@ -608,35 +611,35 @@ class _AssigningDoctorPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Assigning Doctor',
-          style: MtTextStyles.h2.copyWith(color: MtColors.ink),
+          style: MtTextStyles.h2.copyWith(color: c.title),
         ),
         const SizedBox(height: 4),
         Text(
           'Our admin team is matching the best available doctor for your request. This usually takes only a few minutes.',
-          style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+          style: MtTextStyles.bodyMd.copyWith(color: c.body),
         ),
         const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: MtColors.brandSofter,
+            color: c.brand.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: MtColors.brandSoft),
+            border: Border.all(color: c.brand.withValues(alpha: 0.25)),
           ),
           child: Row(
             children: [
-              const SizedBox(
+              SizedBox(
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  valueColor:
-                      AlwaysStoppedAnimation<Color>(MtColors.brand),
+                  valueColor: AlwaysStoppedAnimation<Color>(c.brand),
                 ),
               ),
               const SizedBox(width: 12),
@@ -646,14 +649,12 @@ class _AssigningDoctorPanel extends StatelessWidget {
                   children: [
                     Text(
                       'Looking for the right specialist…',
-                      style: MtTextStyles.labelLg
-                          .copyWith(color: MtColors.ink),
+                      style: MtTextStyles.labelLg.copyWith(color: c.title),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       "We'll notify you as soon as a doctor accepts.",
-                      style: MtTextStyles.bodySm
-                          .copyWith(color: MtColors.ink2),
+                      style: MtTextStyles.bodySm.copyWith(color: c.body),
                     ),
                   ],
                 ),
@@ -697,6 +698,7 @@ class _ProgressSegments extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final activeIndex = _activeIndex;
+    final c = context.appColors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -707,7 +709,7 @@ class _ProgressSegments extends StatelessWidget {
                 child: Container(
                   height: 4,
                   decoration: BoxDecoration(
-                    color: i <= activeIndex ? MtColors.brand : MtColors.line,
+                    color: i <= activeIndex ? c.brand : c.cardBorder,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -724,7 +726,7 @@ class _ProgressSegments extends StatelessWidget {
                 child: Text(
                   _labels[i],
                   style: MtTextStyles.bodySm.copyWith(
-                    color: i == activeIndex ? MtColors.ink : MtColors.ink3,
+                    color: i == activeIndex ? c.title : c.muted,
                     fontWeight: i == activeIndex
                         ? FontWeight.w600
                         : FontWeight.w400,

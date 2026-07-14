@@ -6,12 +6,12 @@ import 'service_catalog_repository.dart';
 
 /// Base URL of the backend. Reads the same `API_BASE_URL` dart-define as
 /// [DioClient], so one flag configures the whole app:
-///   local:             (default) http://localhost:4000
-///   Android emulator:  --dart-define=API_BASE_URL=http://10.0.2.2:4000
+///   local:             (default) http://localhost:5000
+///   Android emulator:  --dart-define=API_BASE_URL=http://10.0.2.2:5000
 ///   deployed (Render): --dart-define=API_BASE_URL=https://medi-treat-backend-api.onrender.com
 const String kApiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'https://medi-treat-backend-api.onrender.com',
+  defaultValue: 'http://localhost:5000',
 );
 
 final serviceCatalogDioProvider = Provider<Dio>((ref) {

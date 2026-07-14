@@ -31,7 +31,7 @@ class ProviderProfileScreen extends StatelessWidget {
     final digits = SupportConfig.supportPhone.replaceAll(RegExp(r'[^0-9]'), '');
     final name = provider?.name ?? 'a provider';
     final text = Uri.encodeComponent(
-      'Hi Medi-Treat, I would like to know more about $name.',
+      'Hi Taafi, I would like to know more about $name.',
     );
     final uri = Uri.parse('https://wa.me/$digits?text=$text');
     try {
@@ -132,10 +132,10 @@ class ProviderProfileScreen extends StatelessWidget {
     final spec = p.specialization.isNotEmpty ? p.specialization : 'Clinician';
     final years = p.yearsExperience;
     if (years <= 0) {
-      return '$spec on the Medi-Treat panel, available for home visits.';
+      return '$spec on the Taafi panel, available for home visits.';
     }
     return '$spec with $years+ years of clinical experience. '
-        'Available for home visits through Medi-Treat.';
+        'Available for home visits through Taafi.';
   }
 }
 

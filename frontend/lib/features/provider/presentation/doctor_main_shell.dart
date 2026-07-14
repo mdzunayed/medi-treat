@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
@@ -43,8 +44,8 @@ class _DoctorMainShellState extends ConsumerState<DoctorMainShell> {
         title: Text('Sign out?', style: MtTextStyles.h3),
         content: Text(
           'সাইন আউট করবেন?',
-          style: MtTextStyles.bodyMd
-              .copyWith(color: MtColors.ink2, fontFamily: 'Kalpurush'),
+          style: MtTextStyles.bodyMd.copyWith(
+              color: ctx.appColors.body, fontFamily: 'Kalpurush'),
         ),
         actions: [
           TextButton(
@@ -53,7 +54,8 @@ class _DoctorMainShellState extends ConsumerState<DoctorMainShell> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: MtColors.rejected),
+            style:
+                TextButton.styleFrom(foregroundColor: ctx.appColors.danger),
             child: const Text('Sign out'),
           ),
         ],
@@ -126,8 +128,9 @@ class _DoctorMainShellState extends ConsumerState<DoctorMainShell> {
           ),
         );
 
+        final c = context.appColors;
         return Scaffold(
-          backgroundColor: MtColors.bg,
+          backgroundColor: c.canvas,
           body: SafeArea(
             bottom: false,
             child: isDesktop
@@ -173,20 +176,20 @@ class _DoctorMainShellState extends ConsumerState<DoctorMainShell> {
               ? null
               : NavigationBarTheme(
                   data: NavigationBarThemeData(
-                    backgroundColor: MtColors.surface,
-                    indicatorColor: MtColors.brandSoft,
+                    backgroundColor: c.surface,
+                    indicatorColor: c.accent.withValues(alpha: 0.15),
                     labelTextStyle: WidgetStateProperty.resolveWith(
                       (states) => MtTextStyles.labelSm.copyWith(
                         color: states.contains(WidgetState.selected)
-                            ? MtColors.brand700
-                            : MtColors.ink3,
+                            ? c.accent
+                            : c.muted,
                       ),
                     ),
                     iconTheme: WidgetStateProperty.resolveWith(
                       (states) => IconThemeData(
                         color: states.contains(WidgetState.selected)
-                            ? MtColors.brand
-                            : MtColors.ink3,
+                            ? c.accent
+                            : c.muted,
                       ),
                     ),
                   ),
@@ -212,10 +215,9 @@ class _DoctorBanner extends ConsumerWidget {
   final VoidCallback onSignOut;
   const _DoctorBanner({required this.onProfile, required this.onSignOut});
 
-  static const _onlineColor = Color(0xFF059669);
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.appColors;
     final user = ref.watch(currentUserProvider);
     final availability = ref.watch(doctorAvailabilityProvider);
     final online = availability.valueOrNull ?? true;
@@ -229,9 +231,9 @@ class _DoctorBanner extends ConsumerWidget {
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: c.cardBorder),
       ),
       child: Column(
         children: [
@@ -240,8 +242,8 @@ class _DoctorBanner extends ConsumerWidget {
               InitialsAvatar(
                 name: firstName,
                 size: 46,
-                backgroundColor: MtColors.brandSoft,
-                textColor: MtColors.brand,
+                backgroundColor: c.accent.withValues(alpha: 0.12),
+                textColor: c.accent,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -250,15 +252,14 @@ class _DoctorBanner extends ConsumerWidget {
                   children: [
                     Text(
                       name.startsWith('Dr.') ? name : 'Dr. $firstName',
-                      style: MtTextStyles.h3.copyWith(color: MtColors.ink),
+                      style: MtTextStyles.h3.copyWith(color: c.title),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       credentials.isEmpty ? 'Care provider' : credentials,
-                      style:
-                          MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                      style: MtTextStyles.bodySm.copyWith(color: c.body),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -268,13 +269,13 @@ class _DoctorBanner extends ConsumerWidget {
               const NotificationBell(),
               IconButton(
                 tooltip: 'My profile',
-                icon: const Icon(Icons.account_circle_outlined,
-                    color: MtColors.ink3, size: 22),
+                icon: Icon(Icons.account_circle_outlined,
+                    color: c.muted, size: 22),
                 onPressed: onProfile,
               ),
               IconButton(
                 tooltip: 'Sign out',
-                icon: const Icon(Icons.logout, color: MtColors.ink3, size: 20),
+                icon: Icon(Icons.logout, color: c.muted, size: 20),
                 onPressed: onSignOut,
               ),
             ],
@@ -283,7 +284,7 @@ class _DoctorBanner extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
             decoration: BoxDecoration(
-              color: online ? const Color(0xFFDCF3E7) : MtColors.bg,
+              color: online ? c.positiveBg : c.surfaceHi,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -292,7 +293,7 @@ class _DoctorBanner extends ConsumerWidget {
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: online ? _onlineColor : MtColors.ink3,
+                    color: online ? c.positive : c.muted,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -303,13 +304,13 @@ class _DoctorBanner extends ConsumerWidget {
                         ? 'Online · accepting new assignments'
                         : 'Offline · not receiving assignments',
                     style: MtTextStyles.labelMd.copyWith(
-                      color: online ? _onlineColor : MtColors.ink3,
+                      color: online ? c.positive : c.muted,
                     ),
                   ),
                 ),
                 Switch.adaptive(
                   value: online,
-                  activeThumbColor: _onlineColor,
+                  activeThumbColor: c.positive,
                   onChanged: isBusy
                       ? null
                       : (_) => ref

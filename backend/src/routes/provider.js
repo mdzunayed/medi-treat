@@ -4,6 +4,7 @@ const Account = require('../models/Account');
 const CareRequest = require('../models/CareRequest');
 const { requireAccountId } = require('../middleware/auth');
 const { loadProviderPair } = require('../utils/doctorView');
+const { roundMoney } = require('../utils/money');
 
 const router = express.Router();
 
@@ -152,8 +153,8 @@ router.get('/earnings', requireAccountId, async (req, res) => {
     });
 
     res.json({
-      total_settled: totalSettled,
-      total_pending: totalPending,
+      total_settled: roundMoney(totalSettled),
+      total_pending: roundMoney(totalPending),
       currency: 'BDT',
       items,
     });

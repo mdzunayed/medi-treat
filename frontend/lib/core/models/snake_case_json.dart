@@ -271,6 +271,11 @@ PatientActiveRequest patientActiveFromMongo(Map<String, dynamic> j) {
     reviewEtaMinutes: _int(j['review_eta_minutes']),
     durationHours: _int(j['duration_hours']),
     offer: _money(j['offered_budget'])?.round(),
+    rawStatus: _str(j['status']) ?? '',
+    depositAmount: _money(j['deposit_amount']) ?? 0,
+    finalServiceFee: _money(j['final_price']),
+    adjustedDiscount: _money(j['adjusted_discount']),
+    patientPhone: _str(j['patient_phone']),
     updatedAt: _date(j['updated_at']) ?? DateTime.now(),
   );
 }

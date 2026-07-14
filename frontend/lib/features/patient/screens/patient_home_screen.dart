@@ -7,25 +7,29 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/api/home_section_providers.dart';
 import '../../../core/api/patient_home_repository.dart';
+import '../../../core/api/promo_banner_providers.dart';
 import '../../../core/api/service_catalog_providers.dart';
 import '../../../core/config/support_config.dart';
 import '../../../core/models/assigned_nurse.dart';
 import '../../../core/models/patient_active_request.dart';
 import '../../../core/models/patient_request_status.dart';
+import '../../../core/models/promo_banner.dart';
 import '../../../core/models/service_catalog_item.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/async_value_view.dart';
+import '../../../core/widgets/frosted_surface.dart';
 import '../../../core/widgets/initials_avatar.dart';
 import '../../../core/widgets/mt_empty_state.dart';
 import '../../../core/widgets/mt_skeleton.dart';
 import '../../auth/auth_provider.dart';
-import '../../shared/presentation/neon_glassmorphic_search_bar.dart';
+import '../../../core/widgets/mt_search_field.dart';
 import '../../notifications/widgets/notification_bell.dart';
 import '../navigation/patient_nav_provider.dart';
-import 'service_detail_screen.dart';
+import '../new_request/new_request_notifier.dart';
+import 'widgets/dynamic_home_sections.dart';
 import 'widgets/patient_home_palette.dart';
-import 'widgets/staggered_animated_card.dart';
 
 final _patientMoneyFmt = NumberFormat('#,###', 'en_US');
 String _patientMoney(num n) => '৳${_patientMoneyFmt.format(n.round())}';
@@ -108,6 +112,7 @@ class PatientHomeScreen extends ConsumerWidget {
     await Future.wait([
       ref.read(patientHomeFeedProvider.notifier).refresh(),
       Future.sync(() => ref.refresh(activeServicesProvider.future)),
+      ref.read(homeSectionRepositoryProvider).refresh(),
     ]);
   }
 
@@ -115,6 +120,7 @@ class PatientHomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final activeRequest = ref.watch(patientActiveRequestProvider);
     final feedAsync = ref.watch(patientHomeFeedProvider);
+    final hd = HomeDark.of(context);
 
     // Height of the frosted header's content row (below the status bar). The
     // brand lockup is a two-line stack, so it needs a touch more room than
@@ -127,15 +133,15 @@ class PatientHomeScreen extends ConsumerWidget {
     // through the frosted bar as it scrolls beneath the system status bar.
     return Stack(
       children: [
-        // Deep midnight canvas painted behind everything so the Home surface
-        // is fully dark regardless of the shell's (light) Scaffold background.
-        const Positioned.fill(child: ColoredBox(color: HomeDark.canvas)),
+        // Theme canvas painted behind everything so the Home surface fills
+        // the viewport (midnight in dark, slate in light).
+        Positioned.fill(child: ColoredBox(color: hd.canvas)),
         Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 600),
             child: RefreshIndicator(
-              color: HomeDark.violetBright,
-              backgroundColor: HomeDark.surfaceHi,
+              color: hd.violetBright,
+              backgroundColor: hd.surfaceHi,
               onRefresh: () => _onRefresh(ref),
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -153,7 +159,8 @@ class PatientHomeScreen extends ConsumerWidget {
                   const _CategoryChipsRail(),
                   const SizedBox(height: 14),
                   _Inset(
-                    child: NeonGlassmorphicSearchBar(
+                    child: MtSearchField(
+                      hintText: 'Search services, doctors...',
                       onChanged: (q) =>
                           ref.read(searchQueryProvider.notifier).state = q,
                     ),
@@ -192,6 +199,9 @@ class PatientHomeScreen extends ConsumerWidget {
                   const SizedBox(height: 12),
                   const _ServicesGrid(),
                   const SizedBox(height: 24),
+                  // Admin-managed server-driven sections (carries its own
+                  // insets/gaps; collapses to zero height when none exist).
+                  const DynamicHomeSections(),
                   const _Inset(child: _QuickHelpCard()),
                 ],
               ),
@@ -240,32 +250,35 @@ class _GlassTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
-      child: ClipRect(
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
-          child: Container(
-            padding: EdgeInsets.fromLTRB(16, topInset, 8, 0),
-            height: topInset + height,
-            decoration: BoxDecoration(
-              color: HomeDark.canvas.withValues(alpha: 0.72),
-              border: const Border(
-                bottom: BorderSide(color: HomeDark.border),
-              ),
+      child: FrostedSurface(
+        blur: 10,
+        child: Container(
+          padding: EdgeInsets.fromLTRB(16, topInset, 8, 0),
+          height: topInset + height,
+          decoration: BoxDecoration(
+            // On web (no backdrop blur) the fill carries the frosting, so it
+            // sits more opaque; native keeps the translucent blur look.
+            color: hd.canvas.withValues(
+              alpha: FrostedSurface.blurSupported ? 0.72 : 0.92,
             ),
-            alignment: Alignment.center,
-            child: child,
+            border: Border(
+              bottom: BorderSide(color: hd.border),
+            ),
           ),
+          alignment: Alignment.center,
+          child: child,
         ),
       ),
     );
   }
 }
 
-/// Home top bar: brand lockup on the left (logo tile + "MediTreat" wordmark
+/// Home top bar: brand lockup on the left (logo tile + "Taafi" wordmark
 /// + "HOME CARE • DHAKA" caption), and the notification bell + circular
 /// profile avatar on the right. Tapping the avatar deep-links to the Account
 /// screen via `ref.goToAccount()` — the exact same view switch the retired
@@ -275,6 +288,7 @@ class _HeaderRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hd = HomeDark.of(context);
     final user = ref.watch(currentUserProvider);
 
     return Row(
@@ -289,10 +303,10 @@ class _HeaderRow extends ConsumerWidget {
             width: 32,
             height: 32,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
+              gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [HomeDark.violet2, HomeDark.violetDeep],
+                colors: [hd.violet2, hd.violetDeep],
               ),
               borderRadius: BorderRadius.circular(10),
             ),
@@ -313,13 +327,13 @@ class _HeaderRow extends ConsumerWidget {
                 TextSpan(
                   children: [
                     TextSpan(
-                      text: 'Medi',
-                      style: MtTextStyles.h2.copyWith(color: HomeDark.title),
+                      text: 'Taa',
+                      style: MtTextStyles.h2.copyWith(color: hd.title),
                     ),
                     TextSpan(
-                      text: 'Treat',
+                      text: 'fi',
                       style:
-                          MtTextStyles.h2.copyWith(color: HomeDark.violetBright),
+                          MtTextStyles.h2.copyWith(color: hd.violetBright),
                     ),
                   ],
                 ),
@@ -329,7 +343,7 @@ class _HeaderRow extends ConsumerWidget {
               Text(
                 'HOME CARE • DHAKA',
                 style: MtTextStyles.labelSm.copyWith(
-                  color: HomeDark.muted,
+                  color: hd.muted,
                   letterSpacing: 0.8,
                 ),
               ),
@@ -355,6 +369,7 @@ class _ProfileAvatarButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hd = HomeDark.of(context);
     final resolved = name?.trim() ?? '';
     return Semantics(
       button: true,
@@ -365,9 +380,9 @@ class _ProfileAvatarButton extends ConsumerWidget {
         child: Container(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: HomeDark.violet, width: 2),
+            border: Border.all(color: hd.violet, width: 2),
             boxShadow: [
-              BoxShadow(color: HomeDark.glow, blurRadius: 10),
+              BoxShadow(color: hd.glow, blurRadius: 10),
             ],
           ),
           padding: const EdgeInsets.all(2),
@@ -375,21 +390,21 @@ class _ProfileAvatarButton extends ConsumerWidget {
               ? Container(
                   width: _size,
                   height: _size,
-                  decoration: const BoxDecoration(
-                    color: HomeDark.surfaceHi,
+                  decoration: BoxDecoration(
+                    color: hd.surfaceHi,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.person_rounded,
-                    color: HomeDark.violetBright,
+                    color: hd.violetBright,
                     size: 22,
                   ),
                 )
               : InitialsAvatar(
                   name: resolved,
                   size: _size,
-                  backgroundColor: HomeDark.surfaceHi,
-                  textColor: HomeDark.violetBright,
+                  backgroundColor: hd.surfaceHi,
+                  textColor: hd.violetBright,
                 ),
         ),
       ),
@@ -409,13 +424,14 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           en.toUpperCase(),
           style: MtTextStyles.sectionLabel.copyWith(
-            color: HomeDark.body,
+            color: hd.body,
             letterSpacing: 1.0,
           ),
         ),
@@ -425,7 +441,7 @@ class _SectionHeader extends StatelessWidget {
           Text(
             bn!,
             style: MtTextStyles.sectionLabel.copyWith(
-              color: HomeDark.muted,
+              color: hd.muted,
               fontFamily: 'Kalpurush',
             ),
           ),
@@ -444,6 +460,7 @@ class _SectionAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -455,12 +472,12 @@ class _SectionAction extends StatelessWidget {
             Text(
               label,
               style: MtTextStyles.labelMd.copyWith(
-                color: HomeDark.violetBright,
+                color: hd.violetBright,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const Icon(Icons.chevron_right_rounded,
-                size: 18, color: HomeDark.violetBright),
+            Icon(Icons.chevron_right_rounded,
+                size: 18, color: hd.violetBright),
           ],
         ),
       ),
@@ -512,8 +529,9 @@ class _CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return Material(
-      color: active ? HomeDark.violet : HomeDark.surface,
+      color: active ? hd.accent : hd.surface,
       borderRadius: BorderRadius.circular(999),
       child: InkWell(
         onTap: onTap,
@@ -524,16 +542,16 @@ class _CategoryChip extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: active ? HomeDark.violet : HomeDark.border,
+              color: active ? hd.accent : hd.border,
             ),
             boxShadow: active
-                ? [BoxShadow(color: HomeDark.glow, blurRadius: 12)]
+                ? [BoxShadow(color: hd.accentGlow, blurRadius: 12)]
                 : null,
           ),
           child: Text(
             label,
             style: MtTextStyles.labelMd.copyWith(
-              color: active ? Colors.white : HomeDark.body,
+              color: active ? Colors.white : hd.body,
               fontWeight: active ? FontWeight.w700 : FontWeight.w600,
             ),
           ),
@@ -543,45 +561,12 @@ class _CategoryChip extends StatelessWidget {
   }
 }
 
-/// Immutable content for one promo slide.
-class _PromoSlide {
-  final String label;
-  final String headline;
-  final String cta;
-  final IconData watermark;
-  const _PromoSlide({
-    required this.label,
-    required this.headline,
-    required this.cta,
-    required this.watermark,
-  });
-}
-
-const List<_PromoSlide> _promoSlides = [
-  _PromoSlide(
-    label: 'FIRST VISIT OFFER',
-    headline: '৳500 off wound-care\ndressing',
-    cta: 'Claim offer',
-    watermark: Icons.healing_rounded,
-  ),
-  _PromoSlide(
-    label: 'VERIFIED TEAM',
-    headline: 'MBBS doctors +\ncertified aides',
-    cta: 'Meet providers',
-    watermark: Icons.verified_user_rounded,
-  ),
-  _PromoSlide(
-    label: '24/7 SUPPORT',
-    headline: 'Care team on call,\nanytime',
-    cta: 'Get help',
-    watermark: Icons.support_agent_rounded,
-  ),
-];
-
-/// Swipeable promo carousel — a `PageView` of vivid violet slides with a
-/// page-dot indicator and a gentle auto-advance. Matches the mockup's dotted
-/// promo strip. Each slide's CTA routes into the New Request flow (kept
-/// in-shell — no new route needed).
+/// Swipeable promo carousel — a `PageView` of vivid gradient slides fed live
+/// from the admin-managed [activeBannersProvider], with a page-dot indicator
+/// and a gentle auto-advance. The dot count, auto-advance modulo, and item
+/// count all track the live banner list. Each slide's CTA routes into the New
+/// Request flow (kept in-shell — no new route needed). Hidden entirely while
+/// loading fails or no active banners exist.
 class _PromoCarousel extends ConsumerStatefulWidget {
   const _PromoCarousel();
 
@@ -594,13 +579,16 @@ class _PromoCarouselState extends ConsumerState<_PromoCarousel> {
   final PageController _controller = PageController();
   Timer? _timer;
   int _page = 0;
+  // Latest banner count, refreshed each build so the auto-advance timer and
+  // dot track stay in sync with the live list.
+  int _count = 0;
 
   @override
   void initState() {
     super.initState();
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted || !_controller.hasClients) return;
-      final next = (_page + 1) % _promoSlides.length;
+      if (!mounted || !_controller.hasClients || _count <= 1) return;
+      final next = (_page + 1) % _count;
       _controller.animateToPage(
         next,
         duration: const Duration(milliseconds: 450),
@@ -618,57 +606,98 @@ class _PromoCarouselState extends ConsumerState<_PromoCarousel> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SizedBox(
-          height: _cardHeight,
-          child: PageView.builder(
-            controller: _controller,
-            itemCount: _promoSlides.length,
-            onPageChanged: (i) => setState(() => _page = i),
-            itemBuilder: (_, i) => _PromoSlideCard(
-              slide: _promoSlides[i],
-              onTap: ref.goToNewRequest,
+    final bannersAsync = ref.watch(activeBannersProvider);
+    return bannersAsync.maybeWhen(
+      data: (banners) {
+        if (banners.isEmpty) {
+          _count = 0;
+          return const SizedBox.shrink();
+        }
+        _count = banners.length;
+        final active = _page.clamp(0, banners.length - 1);
+        return Column(
+          children: [
+            SizedBox(
+              height: _cardHeight,
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: banners.length,
+                onPageChanged: (i) => setState(() => _page = i),
+                itemBuilder: (_, i) => _PromoSlideCard(
+                  banner: banners[i],
+                  onTap: ref.goToNewRequest,
+                ),
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        _PromoDots(count: _promoSlides.length, active: _page),
-      ],
+            const SizedBox(height: 10),
+            _PromoDots(count: banners.length, active: active),
+          ],
+        );
+      },
+      loading: () => const SizedBox(
+        height: _cardHeight,
+        child: _PromoSkeleton(),
+      ),
+      // Error / not-yet-loaded — keep the promo strip out of the way.
+      orElse: () => const SizedBox.shrink(),
     );
   }
 }
 
-/// A single violet-gradient promo slide.
-class _PromoSlideCard extends StatelessWidget {
-  final _PromoSlide slide;
-  final VoidCallback onTap;
-  const _PromoSlideCard({required this.slide, required this.onTap});
+/// A soft placeholder shown while the first banner list loads.
+class _PromoSkeleton extends StatelessWidget {
+  const _PromoSkeleton();
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: hd.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: hd.border),
+      ),
+    );
+  }
+}
+
+/// A single gradient promo slide rendered from a [PromoBanner]. The gradient
+/// stops, tag, title, and CTA label all come from the banner; when it carries
+/// an [PromoBanner.imageUrl] the photo sits as a faint overlay behind the copy.
+class _PromoSlideCard extends StatelessWidget {
+  final PromoBanner banner;
+  final VoidCallback onTap;
+  const _PromoSlideCard({required this.banner, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
+    final hasImage = banner.imageUrl != null && banner.imageUrl!.isNotEmpty;
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: Container(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
+          gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [HomeDark.violet2, HomeDark.violetDeep],
+            colors: banner.gradient,
           ),
           border:
-              Border.all(color: HomeDark.violetBright.withValues(alpha: 0.35)),
+              Border.all(color: hd.violetBright.withValues(alpha: 0.35)),
         ),
         child: Stack(
           children: [
-            Positioned(
-              right: -18,
-              bottom: -24,
-              child: Opacity(
-                opacity: 0.18,
-                child: Icon(slide.watermark, size: 150, color: Colors.white),
+            if (hasImage)
+              Positioned.fill(
+                child: Opacity(
+                  opacity: 0.22,
+                  child: Image.network(
+                    banner.imageUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                  ),
+                ),
               ),
-            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
               child: Column(
@@ -676,7 +705,7 @@ class _PromoSlideCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    slide.label,
+                    banner.tagText,
                     style: MtTextStyles.labelSm.copyWith(
                       color: Colors.white.withValues(alpha: 0.85),
                       letterSpacing: 1.2,
@@ -684,7 +713,7 @@ class _PromoSlideCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    slide.headline,
+                    banner.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     softWrap: true,
@@ -709,17 +738,17 @@ class _PromoSlideCard extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              slide.cta,
+                              banner.buttonText,
                               style: MtTextStyles.labelMd.copyWith(
-                                color: HomeDark.violetDeep,
+                                color: hd.violetDeep,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                             const SizedBox(width: 6),
-                            const Icon(
+                            Icon(
                               Icons.arrow_forward,
                               size: 16,
-                              color: HomeDark.violetDeep,
+                              color: hd.violetDeep,
                             ),
                           ],
                         ),
@@ -745,6 +774,7 @@ class _PromoDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -755,7 +785,7 @@ class _PromoDots extends StatelessWidget {
             width: i == active ? 18 : 6,
             height: 6,
             decoration: BoxDecoration(
-              color: i == active ? HomeDark.violetBright : HomeDark.muted,
+              color: i == active ? hd.violetBright : hd.muted,
               borderRadius: BorderRadius.circular(999),
             ),
           ),
@@ -801,31 +831,31 @@ class _ActiveRequestCard extends ConsumerWidget {
   /// Two-tone pill colors tuned for the dark canvas — a translucent tinted
   /// background with a bright foreground. In-flight rows (on-the-way) read
   /// indigo; terminal / pending rows borrow dark status tints.
-  ({Color background, Color foreground}) get _statusPillColors {
+  ({Color background, Color foreground}) _statusPillColorsFor(HomeDark hd) {
     switch (request.status) {
       case PatientRequestStatus.pendingReview:
         return (
-          background: HomeDark.violet.withValues(alpha: 0.18),
-          foreground: HomeDark.violetBright,
+          background: hd.violet.withValues(alpha: 0.18),
+          foreground: hd.violetBright,
         );
       case PatientRequestStatus.completed:
       case PatientRequestStatus.inService:
         return (
-          background: HomeDark.positiveBg,
-          foreground: HomeDark.positive,
+          background: hd.positiveBg,
+          foreground: hd.positive,
         );
       case PatientRequestStatus.rejected:
       case PatientRequestStatus.cancelled:
         return (
-          background: HomeDark.dangerBg,
-          foreground: HomeDark.danger,
+          background: hd.dangerBg,
+          foreground: hd.danger,
         );
       case PatientRequestStatus.accepted:
       case PatientRequestStatus.enRoute:
       case PatientRequestStatus.arrived:
         return (
-          background: HomeDark.indigo.withValues(alpha: 0.20),
-          foreground: HomeDark.violetBright,
+          background: hd.indigo.withValues(alpha: 0.20),
+          foreground: hd.violetBright,
         );
     }
   }
@@ -889,16 +919,17 @@ class _ActiveRequestCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final pill = _statusPillColors;
+    final hd = HomeDark.of(context);
+    final pill = _statusPillColorsFor(hd);
     final providerName = request.providerName ?? 'Awaiting doctor assignment';
     final showLiveBar = request.status != PatientRequestStatus.cancelled &&
         request.status != PatientRequestStatus.rejected;
 
     return Container(
       decoration: BoxDecoration(
-        color: HomeDark.surface,
+        color: hd.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HomeDark.glow),
+        border: Border.all(color: hd.glow),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.35),
@@ -929,7 +960,7 @@ class _ActiveRequestCard extends ConsumerWidget {
                       Text(
                         providerName,
                         style: MtTextStyles.labelLg.copyWith(
-                          color: HomeDark.title,
+                          color: hd.title,
                           fontWeight: FontWeight.w700,
                         ),
                         maxLines: 1,
@@ -940,7 +971,7 @@ class _ActiveRequestCard extends ConsumerWidget {
                         Text(
                           _providerSubtitle,
                           style: MtTextStyles.bodySm.copyWith(
-                            color: HomeDark.body,
+                            color: hd.body,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -987,14 +1018,15 @@ class _AssignedNurseRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     final subtitle = nurse.specialty.isNotEmpty
         ? nurse.specialty
         : (nurse.yearsExperience > 0
             ? '${nurse.yearsExperience}y experience'
             : 'Nursing care');
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: HomeDark.border)),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: hd.border)),
       ),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Row(
@@ -1015,7 +1047,7 @@ class _AssignedNurseRow extends StatelessWidget {
                       child: Text(
                         'Nurse ${nurse.fullName}',
                         style: MtTextStyles.labelMd.copyWith(
-                          color: HomeDark.title,
+                          color: hd.title,
                           fontWeight: FontWeight.w700,
                         ),
                         maxLines: 1,
@@ -1024,15 +1056,15 @@ class _AssignedNurseRow extends StatelessWidget {
                     ),
                     if (nurse.isVerifiedNurse) ...[
                       const SizedBox(width: 6),
-                      const Icon(Icons.verified,
-                          size: 14, color: HomeDark.violetBright),
+                      Icon(Icons.verified,
+                          size: 14, color: hd.violetBright),
                     ],
                   ],
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: MtTextStyles.bodySm.copyWith(color: HomeDark.body),
+                  style: MtTextStyles.bodySm.copyWith(color: hd.body),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1054,16 +1086,17 @@ class _NurseRoleChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: HomeDark.violet.withValues(alpha: 0.18),
+        color: hd.violet.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         'NURSE',
         style: MtTextStyles.labelSm.copyWith(
-          color: HomeDark.violetBright,
+          color: hd.violetBright,
           fontSize: 9.5,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.8,
@@ -1076,8 +1109,6 @@ class _NurseRoleChip extends StatelessWidget {
 /// Dark violet-tinted circle with bright-violet initials. Falls back to a
 /// network avatar when the backend has a photo for the assigned doctor.
 class _CreamProviderAvatar extends StatelessWidget {
-  static const Color _cream = HomeDark.surfaceHi;
-  static const Color _brown = HomeDark.violetBright;
   static const double _size = 44;
 
   final String name;
@@ -1086,6 +1117,9 @@ class _CreamProviderAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
+    final cream = hd.surfaceHi;
+    final brown = hd.violetBright;
     final cleaned = name.replaceFirst(RegExp(r'^[Dd]r\.?\s+'), '');
     final src = photoUrl;
     if (src != null && src.isNotEmpty) {
@@ -1098,8 +1132,8 @@ class _CreamProviderAvatar extends StatelessWidget {
           errorBuilder: (_, _, _) => InitialsAvatar(
             name: cleaned,
             size: _size,
-            backgroundColor: _cream,
-            textColor: _brown,
+            backgroundColor: cream,
+            textColor: brown,
           ),
         ),
       );
@@ -1107,8 +1141,8 @@ class _CreamProviderAvatar extends StatelessWidget {
     return InitialsAvatar(
       name: cleaned,
       size: _size,
-      backgroundColor: _cream,
-      textColor: _brown,
+      backgroundColor: cream,
+      textColor: brown,
     );
   }
 }
@@ -1165,7 +1199,6 @@ class _StatusPill extends StatelessWidget {
 /// "Track live →" CTA. Tapping the trailing action deep-links to the
 /// tracking tab via [_ActiveRequestCard._onTrackLive].
 class _LiveContextBar extends StatelessWidget {
-  static const Color _band = HomeDark.surfaceHi;
   final String headline;
   final VoidCallback onTrackLive;
 
@@ -1173,25 +1206,26 @@ class _LiveContextBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return Container(
-      decoration: const BoxDecoration(
-        color: _band,
-        border: Border(top: BorderSide(color: HomeDark.border)),
+      decoration: BoxDecoration(
+        color: hd.surfaceHi,
+        border: Border(top: BorderSide(color: hd.border)),
       ),
       padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.directions_car_outlined,
             size: 18,
-            color: HomeDark.violetBright,
+            color: hd.violetBright,
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               headline,
               style: MtTextStyles.labelMd.copyWith(
-                color: HomeDark.title,
+                color: hd.title,
                 fontWeight: FontWeight.w700,
               ),
               maxLines: 1,
@@ -1201,7 +1235,7 @@ class _LiveContextBar extends StatelessWidget {
           TextButton(
             onPressed: onTrackLive,
             style: TextButton.styleFrom(
-              foregroundColor: HomeDark.violetBright,
+              foregroundColor: hd.violetBright,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               minimumSize: const Size(0, 32),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -1212,13 +1246,13 @@ class _LiveContextBar extends StatelessWidget {
                 Text(
                   'Track live',
                   style: MtTextStyles.labelMd.copyWith(
-                    color: HomeDark.violetBright,
+                    color: hd.violetBright,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward,
-                    size: 16, color: HomeDark.violetBright),
+                Icon(Icons.arrow_forward,
+                    size: 16, color: hd.violetBright),
               ],
             ),
           ),
@@ -1233,12 +1267,13 @@ class _ActiveRequestSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: HomeDark.surface,
+        color: hd.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HomeDark.border),
+        border: Border.all(color: hd.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1256,72 +1291,136 @@ class _ActiveRequestSkeleton extends StatelessWidget {
   }
 }
 
-/// Horizontal, edge-to-edge rail of two-tone service cards, filtered by the
-/// active category chip. Fixed height so the `PageView`-free horizontal
-/// `ListView` sits cleanly inside the vertical home scroll.
+/// Adaptive Care Services layout, filtered by the active category chip. On
+/// mobile-width viewports it renders the edge-to-edge `_ServicesCarousel`
+/// rail inside a fixed-height box; on wide (web/desktop) viewports it swaps
+/// to a non-scrolling `_ServicesFluidGrid` so cards reflow instead of being
+/// cut off at the viewport edge. Screen width comes from `MediaQuery` rather
+/// than a `LayoutBuilder` because the home column is capped at 600px, so
+/// incoming constraints can never reveal a wide window.
 class _ServicesGrid extends ConsumerWidget {
   const _ServicesGrid();
 
   static const double _railHeight = 190;
+  static const double _wideBreakpoint = 700;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(activeServicesProvider);
     final category = ref.watch(selectedCategoryProvider);
     final query = ref.watch(searchQueryProvider).trim().toLowerCase();
+    final bool wide = MediaQuery.sizeOf(context).width >= _wideBreakpoint;
 
-    return SizedBox(
-      height: _railHeight,
-      child: AsyncValueView<List<ServiceCatalogItem>>(
-        value: async,
-        onRetry: () => ref.refresh(activeServicesProvider),
-        loadingBuilder: (_) => const _ServicesGridSkeleton(),
-        // Never treat the raw list as empty here — an empty *filtered* result
-        // is handled inside dataBuilder so the "no matches" copy can name the
-        // active category chip / search term.
-        isEmpty: (list) => false,
-        emptyBuilder: (_) => const SizedBox.shrink(),
-        dataBuilder: (_, items) {
-          final filtered = [
-            for (final item in items)
-              if (_serviceMatchesCategory(item, category) &&
-                  (query.isEmpty ||
-                      '${item.title} ${item.category} ${item.description}'
-                          .toLowerCase()
-                          .contains(query)))
-                item,
-          ];
-          if (filtered.isEmpty) {
-            final bool searching = query.isNotEmpty;
-            return _Inset(
-              child: MtEmptyState(
-                icon: searching
-                    ? Icons.search_off_rounded
-                    : Icons.medical_services_outlined,
-                title: searching
-                    ? 'No matches for “$query”'
-                    : category == 'All'
-                        ? 'No services available yet'
-                        : 'No $category services yet',
-                subtitle: searching
-                    ? 'Try a different search or category.'
-                    : category == 'All'
-                        ? 'Check back soon — new services are added regularly.'
-                        : 'Try another category or check back soon.',
-              ),
-            );
-          }
-          return ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: filtered.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
-            itemBuilder: (_, i) => StaggeredAnimatedCard(
-              index: i,
-              child: _AnimatedCareServiceCard(item: filtered[i]),
+    return AsyncValueView<List<ServiceCatalogItem>>(
+      value: async,
+      onRetry: () => ref.refresh(activeServicesProvider),
+      // The skeleton is a horizontal rail, so it needs a bounded height in
+      // both modes; the data branch bounds only the carousel, letting the
+      // grid grow to as many rows as it needs.
+      loadingBuilder: (_) => const SizedBox(
+        height: _railHeight,
+        child: _ServicesGridSkeleton(),
+      ),
+      // Never treat the raw list as empty here — an empty *filtered* result
+      // is handled inside dataBuilder so the "no matches" copy can name the
+      // active category chip / search term.
+      isEmpty: (list) => false,
+      emptyBuilder: (_) => const SizedBox.shrink(),
+      dataBuilder: (_, items) {
+        final filtered = [
+          for (final item in items)
+            if (_serviceMatchesCategory(item, category) &&
+                (query.isEmpty ||
+                    '${item.title} ${item.category} ${item.description}'
+                        .toLowerCase()
+                        .contains(query)))
+              item,
+        ];
+        if (filtered.isEmpty) {
+          final bool searching = query.isNotEmpty;
+          return _Inset(
+            child: MtEmptyState(
+              icon: searching
+                  ? Icons.search_off_rounded
+                  : Icons.medical_services_outlined,
+              title: searching
+                  ? 'No matches for “$query”'
+                  : category == 'All'
+                      ? 'No services available yet'
+                      : 'No $category services yet',
+              subtitle: searching
+                  ? 'Try a different search or category.'
+                  : category == 'All'
+                      ? 'Check back soon — new services are added regularly.'
+                      : 'Try another category or check back soon.',
             ),
           );
-        },
+        }
+        return wide
+            ? _Inset(child: _ServicesFluidGrid(items: filtered))
+            : SizedBox(
+                height: _railHeight,
+                child: _ServicesCarousel(items: filtered),
+              );
+      },
+    );
+  }
+}
+
+/// Non-scrolling fluid grid for wide (web/desktop) viewports. Lives inside
+/// the vertical home `ListView`, so it shrink-wraps and delegates scrolling
+/// to the page; column count and tile proportions adapt to the window width
+/// while the content itself stays within the app-wide 600px cap.
+class _ServicesFluidGrid extends StatelessWidget {
+  final List<ServiceCatalogItem> items;
+  const _ServicesFluidGrid({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final double w = MediaQuery.sizeOf(context).width;
+    final int cols = w >= 1000 ? 3 : 2;
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: cols,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        // Keeps tile proportions close to the mobile rail's ~226×190 (2 cols)
+        // and the 150×190 skeleton card (3 cols) inside the 600px column.
+        childAspectRatio: cols == 3 ? 0.95 : 1.30,
+      ),
+      itemCount: items.length,
+      itemBuilder: (_, i) => _AnimatedCareServiceCard(item: items[i]),
+    );
+  }
+}
+
+/// Flush-edge horizontal rail for the Care Services cards. The 16 px inset
+/// lives *inside* the ListView, so at rest the first card aligns with the
+/// section header while mid-swipe the cards clip flush against the screen
+/// edge. Only the loaded, non-empty list reaches here; the async / filter /
+/// empty-state branches stay in [_ServicesGrid].
+class _ServicesCarousel extends StatelessWidget {
+  /// Fixed card footprint on the rail (the rail's 190 px height comes from
+  /// the parent SizedBox in [_ServicesGrid]).
+  static const double _railCardWidth = 220;
+
+  final List<ServiceCatalogItem> items;
+  const _ServicesCarousel({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: items.length,
+      separatorBuilder: (_, _) => const SizedBox(width: 12),
+      itemBuilder: (_, i) => SizedBox(
+        width: _railCardWidth,
+        child: _AnimatedCareServiceCard(item: items[i]),
       ),
     );
   }
@@ -1329,14 +1428,11 @@ class _ServicesGrid extends ConsumerWidget {
 
 /// Animated two-tone Care Services card. A tactile press shrinks it to 0.96
 /// (glow dimming) and springs back with an `elasticOut` bounce; a faint glass
-/// shimmer sweeps the image header periodically. Entrance staggering is handled
-/// by the [StaggeredAnimatedCard] wrapper in the rail.
+/// shimmer sweeps the image header periodically. Sized by its parent — the
+/// [_ServicesCarousel] rail slot or a [_ServicesFluidGrid] cell.
 class _AnimatedCareServiceCard extends ConsumerStatefulWidget {
   final ServiceCatalogItem item;
   const _AnimatedCareServiceCard({required this.item});
-
-  /// Fixed card width for the horizontal Care Services rail.
-  static const double _cardWidth = 150;
 
   @override
   ConsumerState<_AnimatedCareServiceCard> createState() =>
@@ -1387,63 +1483,69 @@ class _AnimatedCareServiceCardState
       ..forward();
   }
 
-  Future<void> _openService() async {
-    final book = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => ServiceDetailScreen(item: widget.item)),
-    );
-    if (book == true && mounted) ref.goToNewRequest();
+  /// Pre-selects this card's service in the booking form and jumps straight
+  /// to the New Request tab — no intermediate detail screen.
+  void _bookService() {
+    ref.read(newRequestProvider.notifier).applyServicePrefill(widget.item);
+    ref.goToNewRequest();
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: _onTapDown,
-      onTapUp: (_) => _onTapRelease(),
-      onTapCancel: _onTapRelease,
-      onTap: _openService,
-      child: AnimatedBuilder(
-        animation: _press,
-        builder: (context, child) {
-          final scale = _scale.value;
-          // 0 (released) .. 1 (fully pressed) — dims the glow on press.
-          final pressed = ((1.0 - scale) / 0.04).clamp(0.0, 1.0);
-          return Transform.scale(
-            scale: scale,
-            child: Container(
-              width: _AnimatedCareServiceCard._cardWidth,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color:
-                        HomeDark.violet.withValues(alpha: 0.30 * (1 - pressed)),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: child,
+    final hd = HomeDark.of(context);
+    return AnimatedBuilder(
+      animation: _press,
+      builder: (context, child) {
+        final scale = _scale.value;
+        // 0 (released) .. 1 (fully pressed) — dims the glow on press.
+        final pressed = ((1.0 - scale) / 0.04).clamp(0.0, 1.0);
+        return Transform.scale(
+          scale: scale,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color:
+                      hd.violet.withValues(alpha: 0.30 * (1 - pressed)),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
-          );
-        },
-        child: _cardBody(),
-      ),
+            child: child,
+          ),
+        );
+      },
+      child: _cardBody(),
     );
   }
 
   Widget _cardBody() {
+    final hd = HomeDark.of(context);
     final item = widget.item;
     final hasCategory = item.category.trim().isNotEmpty;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: HomeDark.surface,
-          border: Border.all(color: HomeDark.border),
+      // Material + InkWell replace the old DecoratedBox/GestureDetector pair
+      // so taps get a ripple clipped to the card's 24px corners. The InkWell
+      // also drives the press-scale controller, keeping the squash animation.
+      child: Material(
+        color: hd.surface,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: hd.border),
         ),
-        child: Column(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTapDown: _onTapDown,
+          onTapCancel: _onTapRelease,
+          onTap: () {
+            _onTapRelease();
+            _bookService();
+          },
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // ---- Top: photo / gradient+icon, badge, shimmer sweep ----
@@ -1473,7 +1575,7 @@ class _AnimatedCareServiceCardState
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: HomeDark.canvas.withValues(alpha: 0.55),
+                            color: hd.canvas.withValues(alpha: 0.55),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -1507,7 +1609,7 @@ class _AnimatedCareServiceCardState
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: MtTextStyles.labelLg
-                                .copyWith(color: HomeDark.title),
+                                .copyWith(color: hd.title),
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -1517,7 +1619,7 @@ class _AnimatedCareServiceCardState
                             // Monospace + tabular figures for a clean, legible
                             // price string.
                             style: MtTextStyles.timer.copyWith(
-                              color: HomeDark.muted,
+                              color: hd.muted,
                               fontFeatures: const [
                                 ui.FontFeature.tabularFigures(),
                               ],
@@ -1527,14 +1629,16 @@ class _AnimatedCareServiceCardState
                       ),
                     ),
                     const SizedBox(width: 6),
-                    // Quick-add — routes into the same detail/booking flow as
-                    // tapping the card body; presses independently.
-                    _AddServiceButton(onTap: _openService),
+                    // Quick-add — same direct-booking action as tapping the
+                    // card body; presses independently (its own gesture wins
+                    // the arena over the card's InkWell).
+                    _AddServiceButton(onTap: _bookService),
                   ],
                 ),
               ),
             ),
           ],
+          ),
         ),
       ),
     );
@@ -1590,12 +1694,13 @@ class _ServiceHeaderFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [HomeDark.violet2, HomeDark.violetDeep],
+          colors: [hd.violet2, hd.violetDeep],
         ),
       ),
       child: icon == null
@@ -1653,6 +1758,7 @@ class _AddServiceButtonState extends State<_AddServiceButton>
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return GestureDetector(
       onTapDown: _down,
       onTapUp: (_) => _up(),
@@ -1666,11 +1772,11 @@ class _AddServiceButtonState extends State<_AddServiceButton>
           width: 30,
           height: 30,
           decoration: BoxDecoration(
-            color: HomeDark.teal.withValues(alpha: 0.18),
+            color: hd.teal.withValues(alpha: 0.18),
             shape: BoxShape.circle,
-            border: Border.all(color: HomeDark.teal, width: 1),
+            border: Border.all(color: hd.teal, width: 1),
           ),
-          child: const Icon(Icons.add_rounded, color: HomeDark.teal, size: 20),
+          child: Icon(Icons.add_rounded, color: hd.teal, size: 20),
         ),
       ),
     );
@@ -1682,18 +1788,19 @@ class _ServicesGridSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return ListView.separated(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: 4,
       separatorBuilder: (_, _) => const SizedBox(width: 12),
       itemBuilder: (context, _) => Container(
-        width: _AnimatedCareServiceCard._cardWidth,
+        width: _ServicesCarousel._railCardWidth,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: HomeDark.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: HomeDark.border),
+          color: hd.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: hd.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1701,7 +1808,7 @@ class _ServicesGridSkeleton extends StatelessWidget {
             Expanded(
               flex: 5,
               child: ColoredBox(
-                color: HomeDark.violet.withValues(alpha: 0.16),
+                color: hd.violet.withValues(alpha: 0.16),
               ),
             ),
             Expanded(
@@ -1752,8 +1859,9 @@ class _QuickHelpCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hd = HomeDark.of(context);
     return Material(
-      color: HomeDark.surface,
+      color: hd.surface,
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -1761,7 +1869,7 @@ class _QuickHelpCard extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: HomeDark.border),
+            border: Border.all(color: hd.border),
           ),
           padding: const EdgeInsets.all(14),
           child: Row(
@@ -1770,11 +1878,11 @@ class _QuickHelpCard extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: HomeDark.violet.withValues(alpha: 0.20),
+                  color: hd.violet.withValues(alpha: 0.20),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.phone_in_talk_rounded,
-                    color: HomeDark.violetBright, size: 22),
+                child: Icon(Icons.phone_in_talk_rounded,
+                    color: hd.violetBright, size: 22),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -1784,14 +1892,14 @@ class _QuickHelpCard extends StatelessWidget {
                     Text(
                       'Need help?',
                       style: MtTextStyles.labelLg.copyWith(
-                        color: HomeDark.title,
+                        color: hd.title,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       SupportConfig.supportHoursLabel,
-                      style: MtTextStyles.bodySm.copyWith(color: HomeDark.muted),
+                      style: MtTextStyles.bodySm.copyWith(color: hd.muted),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1799,8 +1907,8 @@ class _QuickHelpCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(Icons.chevron_right_rounded,
-                  color: HomeDark.muted, size: 22),
+              Icon(Icons.chevron_right_rounded,
+                  color: hd.muted, size: 22),
             ],
           ),
         ),

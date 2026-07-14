@@ -1,4 +1,4 @@
-# Medi-Treat Backend
+# Taafi Backend
 
 Node.js + Express + Mongoose + Multer. Backs the Flutter app's service catalog
 (`/api/services`) and serves uploaded images from `/uploads/*`.
@@ -31,7 +31,7 @@ docker compose down -v         # drops the database too
 ```bash
 cd backend
 npm install
-MONGO_URI=mongodb://localhost:27017/meditreat npm run dev
+MONGO_URI=mongodb://localhost:27017/taafi npm run dev
 ```
 
 This uses your existing host mongo on 27017.

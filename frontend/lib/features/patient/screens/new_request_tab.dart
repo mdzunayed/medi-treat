@@ -7,7 +7,7 @@ import '../../../core/api/service_catalog_providers.dart';
 import '../../../core/models/dependent.dart';
 import '../../../core/models/saved_address.dart';
 import '../../../core/models/service_catalog_item.dart';
-import '../../../core/theme/mt_colors.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/async_value_view.dart';
 import '../../../core/widgets/mt_empty_state.dart';
@@ -16,6 +16,7 @@ import '../navigation/patient_nav_provider.dart';
 import '../new_request/new_request_notifier.dart';
 import '../new_request/new_request_state.dart';
 import '../profile/patient_lifecycle_providers.dart';
+import 'booking_flow_pages.dart';
 import 'select_address_sheet.dart';
 
 /// New care-request flow. Pure ConsumerWidget — all form state lives in
@@ -75,6 +76,7 @@ class _NewRequestTabState extends ConsumerState<NewRequestTab> {
 
   Future<void> _handleSubmit(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
+    final dangerColor = context.appColors.danger;
     final id = await ref.read(newRequestProvider.notifier).submit();
     if (!mounted) return;
 
@@ -99,7 +101,7 @@ class _NewRequestTabState extends ConsumerState<NewRequestTab> {
                 Expanded(child: Text(err)),
               ],
             ),
-            backgroundColor: MtColors.rejected,
+            backgroundColor: dangerColor,
             duration: Duration(seconds: isOffline ? 5 : 4),
           ),
         );
@@ -107,20 +109,29 @@ class _NewRequestTabState extends ConsumerState<NewRequestTab> {
       return;
     }
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text('Request $id submitted to medi-treat admin'),
-        backgroundColor: MtColors.completed,
-      ),
-    );
+    final serviceName =
+        ref.read(newRequestProvider).selectedService?.title ?? '';
     // Clear the submission flag so the button re-enables if the patient
     // stays on the form (e.g. for a second submission later).
     ref.read(newRequestProvider.notifier).clearSubmissionStatus();
+
+    // Phase 1 — present the ৳100 confirmation deposit gateway. The booking
+    // was created as `awaiting_deposit`; paying the deposit locks the slot
+    // and moves it into the admin review queue. If the patient dismisses
+    // the sheet without paying, they can still complete the deposit from
+    // the Under Review tab.
+    if (!context.mounted) return;
+    await showConfirmAppointmentRequestSheet(
+      context,
+      bookingId: id,
+      serviceName: serviceName,
+    );
+    if (!mounted) return;
+
     // Route the patient to the Activities → "Under Review" sub-tab.
     // The bottom-nav shell exposes a single `goToActivities(...)`
     // helper that coordinates both providers atomically — no widget
     // here has to know which destination owns which sub-tab.
-    if (!mounted) return;
     ref.goToActivities(sub: PatientActivitiesTab.underReview);
   }
 
@@ -298,37 +309,19 @@ class _NewRequestTabState extends ConsumerState<NewRequestTab> {
   ) async {
     final now = DateTime.now();
     final initialDate = state.scheduledAt ?? now.add(const Duration(hours: 4));
+    // No Theme override: MtTheme.light()/dark() already supply a correct
+    // per-brightness ColorScheme, so the pickers follow the active theme.
     final date = await showDatePicker(
       context: context,
       initialDate: initialDate.isBefore(now) ? now : initialDate,
       firstDate: now,
       lastDate: now.add(const Duration(days: 30)),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: MtColors.brand,
-            onPrimary: Colors.white,
-            onSurface: MtColors.ink,
-          ),
-        ),
-        child: child ?? const SizedBox.shrink(),
-      ),
     );
     if (date == null || !mounted) return;
     final time = await showTimePicker(
       // ignore: use_build_context_synchronously
       context: context,
       initialTime: TimeOfDay.fromDateTime(initialDate),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: MtColors.brand,
-            onPrimary: Colors.white,
-            onSurface: MtColors.ink,
-          ),
-        ),
-        child: child ?? const SizedBox.shrink(),
-      ),
     );
     if (time == null) return;
     final picked = DateTime(date.year, date.month, date.day, time.hour, time.minute);
@@ -348,7 +341,8 @@ class _NewRequestTabState extends ConsumerState<NewRequestTab> {
         title: Text('Attach discharge summary', style: MtTextStyles.h3),
         content: Text(
           'Confirm the patient has a discharge summary or recent prescription. The doctor team will review it on arrival.',
-          style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+          style: MtTextStyles.bodyMd
+              .copyWith(color: dialogContext.appColors.body),
         ),
         actions: [
           TextButton(
@@ -357,7 +351,9 @@ class _NewRequestTabState extends ConsumerState<NewRequestTab> {
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: TextButton.styleFrom(foregroundColor: MtColors.brand),
+            style: TextButton.styleFrom(
+              foregroundColor: dialogContext.appColors.brand,
+            ),
             child: Text('Attach', style: MtTextStyles.labelMd),
           ),
         ],
@@ -429,7 +425,9 @@ class _NewRequestTabState extends ConsumerState<NewRequestTab> {
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: TextButton.styleFrom(foregroundColor: MtColors.brand),
+            style: TextButton.styleFrom(
+              foregroundColor: dialogContext.appColors.brand,
+            ),
             child: Text('Save', style: MtTextStyles.labelMd),
           ),
         ],
@@ -476,8 +474,9 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
-      color: MtColors.surface,
+      color: c.surface,
       child: Column(
         children: [
           Padding(
@@ -485,7 +484,7 @@ class _Header extends StatelessWidget {
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back, color: MtColors.ink),
+                  icon: Icon(Icons.arrow_back, color: c.title),
                   onPressed: onBack,
                 ),
                 Expanded(
@@ -494,13 +493,13 @@ class _Header extends StatelessWidget {
                     children: [
                       Text(
                         'New care request',
-                        style: MtTextStyles.h3.copyWith(color: MtColors.ink),
+                        style: MtTextStyles.h3.copyWith(color: c.title),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         'Step 1 of 1 · All details',
                         style: MtTextStyles.bodySm.copyWith(
-                          color: MtColors.ink3,
+                          color: c.muted,
                         ),
                       ),
                     ],
@@ -511,11 +510,11 @@ class _Header extends StatelessWidget {
           ),
           Container(
             height: 4,
-            color: MtColors.line,
+            color: c.cardBorder,
             child: FractionallySizedBox(
               alignment: Alignment.centerLeft,
               widthFactor: 0.4,
-              child: Container(color: MtColors.brand),
+              child: Container(color: c.brand),
             ),
           ),
         ],
@@ -531,13 +530,14 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           en.toUpperCase(),
           style: MtTextStyles.sectionLabel.copyWith(
-            color: MtColors.ink3,
+            color: c.muted,
             letterSpacing: 1.0,
           ),
         ),
@@ -545,7 +545,7 @@ class _SectionHeader extends StatelessWidget {
           Text(
             bn ?? '',
             style: MtTextStyles.sectionLabel.copyWith(
-              color: MtColors.ink3,
+              color: c.muted,
               fontFamily: 'Kalpurush',
             ),
           ),
@@ -616,6 +616,7 @@ class _CareTypeOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -624,10 +625,10 @@ class _CareTypeOption extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
           decoration: BoxDecoration(
-            color: selected ? MtColors.brandSofter : MtColors.surface,
+            color: selected ? c.brand.withValues(alpha: 0.08) : c.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected ? MtColors.brand : MtColors.line,
+              color: selected ? c.brand : c.cardBorder,
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -641,14 +642,14 @@ class _CareTypeOption extends StatelessWidget {
                   children: [
                     Text(
                       item.title,
-                      style: MtTextStyles.labelLg.copyWith(color: MtColors.ink),
+                      style: MtTextStyles.labelLg.copyWith(color: c.title),
                     ),
                     if (item.category.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Text(
                         item.category,
                         style: MtTextStyles.bodySm.copyWith(
-                          color: MtColors.ink2,
+                          color: c.body,
                           fontFamily: 'Kalpurush',
                         ),
                       ),
@@ -670,20 +671,21 @@ class _Radio extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       width: 22,
       height: 22,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(
-          color: selected ? MtColors.brand : MtColors.ink3,
+          color: selected ? c.brand : c.muted,
           width: 2,
         ),
-        color: selected ? MtColors.brand : Colors.transparent,
+        color: selected ? c.brand : Colors.transparent,
       ),
       child: selected
-          ? const Center(
-              child: Icon(Icons.circle, size: 8, color: Colors.white),
+          ? Center(
+              child: Icon(Icons.circle, size: 8, color: c.onAccent),
             )
           : null,
     );
@@ -709,6 +711,7 @@ class _LocationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     // No saved address yet — prompt the patient to add one. Submission is
     // blocked (see `_SubmitBar.enabled`) until a real address is chosen.
     if (address.isEmpty) {
@@ -720,9 +723,9 @@ class _LocationCard extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: MtColors.surface,
+              color: c.surface,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: MtColors.brand, width: 1.2),
+              border: Border.all(color: c.brand, width: 1.2),
             ),
             child: Row(
               children: [
@@ -730,28 +733,30 @@ class _LocationCard extends StatelessWidget {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: MtColors.brandSoft,
+                    color: c.brand.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.add_location_alt_outlined,
-                      color: MtColors.brand, size: 20),
+                  child: Icon(Icons.add_location_alt_outlined,
+                      color: c.brand, size: 20),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Add your address', style: MtTextStyles.labelLg),
+                      Text(
+                        'Add your address',
+                        style: MtTextStyles.labelLg.copyWith(color: c.title),
+                      ),
                       const SizedBox(height: 2),
                       Text(
                         'Choose where the medical team should visit',
-                        style:
-                            MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                        style: MtTextStyles.bodySm.copyWith(color: c.body),
                       ),
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right, color: MtColors.ink3),
+                Icon(Icons.chevron_right, color: c.muted),
               ],
             ),
           ),
@@ -761,9 +766,9 @@ class _LocationCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: c.cardBorder),
       ),
       child: Column(
         children: [
@@ -775,12 +780,12 @@ class _LocationCard extends StatelessWidget {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: MtColors.brandSoft,
+                    color: c.brand.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.location_on,
-                    color: MtColors.brand,
+                    color: c.brand,
                     size: 20,
                   ),
                 ),
@@ -791,27 +796,27 @@ class _LocationCard extends StatelessWidget {
                     children: [
                       Text(
                         address.line1,
-                        style: MtTextStyles.labelLg,
+                        style: MtTextStyles.labelLg.copyWith(color: c.title),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         '${address.areaCityZip} · ${address.label}',
                         style: MtTextStyles.bodySm.copyWith(
-                          color: MtColors.ink2,
+                          color: c.body,
                         ),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.edit, size: 18, color: MtColors.ink3),
+                  icon: Icon(Icons.edit, size: 18, color: c.muted),
                   onPressed: onEdit,
                   tooltip: 'Edit address',
                 ),
               ],
             ),
           ),
-          const Divider(height: 1, color: MtColors.line),
+          Divider(height: 1, color: c.cardBorder),
           if (!showLandmarkField)
             InkWell(
               onTap: onToggleLandmark,
@@ -826,11 +831,11 @@ class _LocationCard extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.add, size: 18, color: MtColors.ink2),
+                    Icon(Icons.add, size: 18, color: c.body),
                     const SizedBox(width: 6),
                     Text(
                       'Add landmark or unit number',
-                      style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+                      style: MtTextStyles.bodyMd.copyWith(color: c.body),
                     ),
                   ],
                 ),
@@ -841,14 +846,13 @@ class _LocationCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
               child: Row(
                 children: [
-                  const Icon(Icons.place_outlined,
-                      size: 18, color: MtColors.ink2),
+                  Icon(Icons.place_outlined, size: 18, color: c.body),
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
                       controller: landmarkController,
                       onChanged: onLandmarkChanged,
-                      style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink),
+                      style: MtTextStyles.bodyMd.copyWith(color: c.title),
                       decoration: const InputDecoration(
                         isCollapsed: true,
                         border: InputBorder.none,
@@ -866,7 +870,7 @@ class _LocationCard extends StatelessWidget {
                       onLandmarkChanged('');
                       onToggleLandmark();
                     },
-                    icon: const Icon(Icons.close, size: 18, color: MtColors.ink3),
+                    icon: Icon(Icons.close, size: 18, color: c.muted),
                     tooltip: 'Remove landmark',
                   ),
                 ],
@@ -935,6 +939,7 @@ class _WhenCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -943,10 +948,10 @@ class _WhenCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: selected ? MtColors.brandSofter : MtColors.surface,
+            color: selected ? c.brand.withValues(alpha: 0.08) : c.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected ? MtColors.brand : MtColors.line,
+              color: selected ? c.brand : c.cardBorder,
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -955,14 +960,14 @@ class _WhenCard extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: MtTextStyles.labelLg.copyWith(color: MtColors.ink),
+                style: MtTextStyles.labelLg.copyWith(color: c.title),
               ),
               const SizedBox(height: 4),
               Text(
                 subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                style: MtTextStyles.bodySm.copyWith(color: c.body),
               ),
             ],
           ),
@@ -997,12 +1002,13 @@ class _NotesCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: c.cardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1012,7 +1018,7 @@ class _NotesCard extends StatelessWidget {
             onChanged: onNotesChanged,
             maxLines: 4,
             minLines: 2,
-            style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink),
+            style: MtTextStyles.bodyMd.copyWith(color: c.title),
             decoration: const InputDecoration(
               isCollapsed: true,
               border: InputBorder.none,
@@ -1074,6 +1080,7 @@ class _AttachChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     final filled = value != null && value!.trim().isNotEmpty;
     return Material(
       color: Colors.transparent,
@@ -1083,7 +1090,7 @@ class _AttachChip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: filled ? MtColors.brand : MtColors.brandSoft,
+            color: filled ? c.brand : c.brand.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Row(
@@ -1092,7 +1099,7 @@ class _AttachChip extends StatelessWidget {
               Icon(
                 filled ? Icons.check_circle : icon,
                 size: 14,
-                color: filled ? Colors.white : MtColors.brand,
+                color: filled ? c.onAccent : c.brand,
               ),
               const SizedBox(width: 6),
               ConstrainedBox(
@@ -1102,7 +1109,7 @@ class _AttachChip extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: MtTextStyles.labelSm.copyWith(
-                    color: filled ? Colors.white : MtColors.brand,
+                    color: filled ? c.onAccent : c.brand,
                   ),
                 ),
               ),
@@ -1110,10 +1117,10 @@ class _AttachChip extends StatelessWidget {
                 const SizedBox(width: 6),
                 GestureDetector(
                   onTap: onClear,
-                  child: const Icon(
+                  child: Icon(
                     Icons.close,
                     size: 14,
-                    color: Colors.white,
+                    color: c.onAccent,
                   ),
                 ),
               ],
@@ -1131,22 +1138,22 @@ class _InlineError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFDECEC),
+        color: c.dangerBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: MtColors.rejected.withValues(alpha: 0.4)),
+        border: Border.all(color: c.danger.withValues(alpha: 0.4)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline,
-              color: MtColors.rejected, size: 18),
+          Icon(Icons.error_outline, color: c.danger, size: 18),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               message,
-              style: MtTextStyles.bodySm.copyWith(color: MtColors.rejected),
+              style: MtTextStyles.bodySm.copyWith(color: c.danger),
             ),
           ),
         ],
@@ -1168,11 +1175,12 @@ class _SubmitBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: const BoxDecoration(
-        color: MtColors.surface,
-        border: Border(top: BorderSide(color: MtColors.line)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(top: BorderSide(color: c.cardBorder)),
       ),
       child: SafeArea(
         top: false,
@@ -1183,12 +1191,12 @@ class _SubmitBar extends StatelessWidget {
             // there's no patient-facing total here — just set expectations.
             Row(
               children: [
-                Icon(Icons.info_outline, size: 16, color: MtColors.ink3),
+                Icon(Icons.info_outline, size: 16, color: c.muted),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Admin will contact you directly to finalize service payment terms.',
-                    style: MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                    style: MtTextStyles.bodySm.copyWith(color: c.body),
                   ),
                 ),
               ],
@@ -1200,9 +1208,10 @@ class _SubmitBar extends StatelessWidget {
               child: ElevatedButton(
                 onPressed: enabled ? onSubmit : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: MtColors.brand,
-                  disabledBackgroundColor: MtColors.line,
-                  foregroundColor: Colors.white,
+                  backgroundColor: c.accent,
+                  foregroundColor: c.onAccent,
+                  disabledBackgroundColor: c.surfaceHi,
+                  disabledForegroundColor: c.muted,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1211,27 +1220,28 @@ class _SubmitBar extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     if (isLoading) ...[
-                      const SizedBox(
+                      SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation(Colors.white),
+                          valueColor: AlwaysStoppedAnimation(c.onAccent),
                         ),
                       ),
                       const SizedBox(width: 10),
                       Text(
                         'Submitting…',
                         style: MtTextStyles.labelLg
-                            .copyWith(color: Colors.white),
+                            .copyWith(color: c.onAccent),
                       ),
                     ] else ...[
                       const Icon(Icons.send, size: 18),
                       const SizedBox(width: 8),
                       Text(
-                        'Submit to Medi-Treat admin',
-                        style: MtTextStyles.labelLg
-                            .copyWith(color: Colors.white),
+                        'Submit to Taafi admin',
+                        // No explicit color: inherits the button's foreground,
+                        // so the disabled state can dim the label too.
+                        style: MtTextStyles.labelLg,
                       ),
                     ],
                   ],
@@ -1262,26 +1272,27 @@ class _DialogField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       autofocus: autofocus,
-      style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink),
+      style: MtTextStyles.bodyMd.copyWith(color: c.title),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+        labelStyle: MtTextStyles.bodySm.copyWith(color: c.muted),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: MtColors.line),
+          borderSide: BorderSide(color: c.cardBorder),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: MtColors.line),
+          borderSide: BorderSide(color: c.cardBorder),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: MtColors.brand, width: 1.5),
+          borderSide: BorderSide(color: c.brand, width: 1.5),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
@@ -1334,6 +1345,7 @@ class _VoiceRecorderDialogState extends State<_VoiceRecorderDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     return AlertDialog(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
@@ -1349,10 +1361,10 @@ class _VoiceRecorderDialogState extends State<_VoiceRecorderDialog> {
               height: 88,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _recording ? MtColors.rejected : MtColors.brand,
+                color: _recording ? c.danger : c.brand,
                 boxShadow: [
                   BoxShadow(
-                    color: (_recording ? MtColors.rejected : MtColors.brand)
+                    color: (_recording ? c.danger : c.brand)
                         .withValues(alpha: 0.30),
                     blurRadius: 18,
                     spreadRadius: 4,
@@ -1361,7 +1373,7 @@ class _VoiceRecorderDialogState extends State<_VoiceRecorderDialog> {
               ),
               child: Icon(
                 _recording ? Icons.stop : Icons.mic,
-                color: Colors.white,
+                color: c.onAccent,
                 size: 40,
               ),
             ),
@@ -1371,7 +1383,7 @@ class _VoiceRecorderDialogState extends State<_VoiceRecorderDialog> {
             _seconds == 0
                 ? 'Tap to start recording'
                 : _formatSeconds(_seconds),
-            style: MtTextStyles.h3.copyWith(color: MtColors.ink),
+            style: MtTextStyles.h3.copyWith(color: c.title),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1379,7 +1391,7 @@ class _VoiceRecorderDialogState extends State<_VoiceRecorderDialog> {
                 ? 'Recording… tap to stop'
                 : 'Max 60 seconds. Doctors review before arrival.',
             textAlign: TextAlign.center,
-            style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+            style: MtTextStyles.bodySm.copyWith(color: c.muted),
           ),
         ],
       ),
@@ -1392,7 +1404,7 @@ class _VoiceRecorderDialogState extends State<_VoiceRecorderDialog> {
           onPressed: _seconds > 0 && !_recording
               ? () => Navigator.of(context).pop(_seconds)
               : null,
-          style: TextButton.styleFrom(foregroundColor: MtColors.brand),
+          style: TextButton.styleFrom(foregroundColor: c.brand),
           child: Text('Save', style: MtTextStyles.labelMd),
         ),
       ],
@@ -1415,6 +1427,7 @@ class _CareRecipientChips extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.appColors;
     final async = ref.watch(dependentsProvider);
     final dependents = async.valueOrNull ?? const <Dependent>[];
     return SizedBox(
@@ -1423,6 +1436,7 @@ class _CareRecipientChips extends ConsumerWidget {
         scrollDirection: Axis.horizontal,
         children: [
           _chip(
+            c: c,
             label: 'Myself',
             icon: Icons.person,
             active: selected == null,
@@ -1433,6 +1447,7 @@ class _CareRecipientChips extends ConsumerWidget {
           ),
           for (final d in dependents)
             _chip(
+              c: c,
               label: d.fullName,
               icon: Icons.family_restroom,
               active: selected?.dependentId == d.id,
@@ -1454,6 +1469,7 @@ class _CareRecipientChips extends ConsumerWidget {
   }
 
   Widget _chip({
+    required AppColors c,
     required String label,
     required IconData icon,
     required bool active,
@@ -1462,7 +1478,7 @@ class _CareRecipientChips extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Material(
-        color: active ? MtColors.brandSoft : MtColors.surface,
+        color: active ? c.brand.withValues(alpha: 0.12) : c.surface,
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
@@ -1472,20 +1488,19 @@ class _CareRecipientChips extends ConsumerWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: active ? MtColors.brand : MtColors.line,
+                color: active ? c.brand : c.cardBorder,
                 width: active ? 1.5 : 1,
               ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon,
-                    size: 16, color: active ? MtColors.brand : MtColors.ink3),
+                Icon(icon, size: 16, color: active ? c.brand : c.muted),
                 const SizedBox(width: 6),
                 Text(
                   label,
                   style: MtTextStyles.labelMd.copyWith(
-                    color: active ? MtColors.brand : MtColors.ink2,
+                    color: active ? c.brand : c.body,
                     fontWeight: FontWeight.w700,
                   ),
                 ),

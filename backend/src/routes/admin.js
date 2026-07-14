@@ -17,6 +17,7 @@ const {
 const { sendHighPriorityPush } = require('../services/fcmService');
 const { requireRole } = require('../middleware/auth');
 const { normalizePhone } = require('../utils/phone');
+const { DEPOSIT_AMOUNT, roundMoney } = require('../utils/money');
 const adminController = require('../controllers/admin.controller');
 
 const BCRYPT_ROUNDS = 10;
@@ -32,11 +33,12 @@ const TERMINAL = ['completed', 'cancelled', 'rejected'];
 // `findOneAndUpdate` assignment path below bypasses Mongoose middleware.
 function withPaymentTotal(payment) {
   const merged = { ...payment };
-  merged.total =
+  merged.total = roundMoney(
     (Number(merged.doctor_fee) || 0) +
-    (Number(merged.nurse_fee) || 0) +
-    (Number(merged.helper_fee) || 0) +
-    (Number(merged.platform_fee) || 0);
+      (Number(merged.nurse_fee) || 0) +
+      (Number(merged.helper_fee) || 0) +
+      (Number(merged.platform_fee) || 0),
+  );
   return merged;
 }
 
@@ -218,7 +220,7 @@ function pickPaymentPatch(b, currentPayment) {
     }
     const n = Number(raw);
     if (!Number.isFinite(n)) continue;
-    out[f] = n;
+    out[f] = roundMoney(n);
     touched = true;
   }
   return touched ? out : {};
@@ -369,6 +371,260 @@ router.get('/requests', async (_req, res) => {
   }
 });
 
+// POST /admin/requests/:id/set-price
+//   { final_service_fee, adjusted_discount?, admin_note? }
+//
+// Phase-2 pricing gateway. After the admin reviews the paid booking and
+// calls the client, they commit the assessed base service fee here. This is
+// SEPARATE from provider dispatch (`/assign` below): it flips the request to
+// `amount_assigned_awaiting_final_payment` and notifies the patient to review
+// their dynamic invoice + pay the outstanding balance. Provider assignment
+// happens afterward, once the balance clears (status re-enters `approved`).
+router.post('/requests/:id/set-price', requireRole('admin'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const feeRaw = Number(b.final_service_fee ?? b.finalServiceFee ?? b.final_price);
+    if (!Number.isFinite(feeRaw) || feeRaw <= 0) {
+      return res.status(400).json({
+        message: 'A final service fee greater than 0 is required.',
+      });
+    }
+    const fee = roundMoney(feeRaw);
+    const discountRaw = b.adjusted_discount ?? b.adjustedDiscount ?? 0;
+    const discount = roundMoney(Number(discountRaw) || 0);
+    if (discount < 0) {
+      return res.status(400).json({ message: 'Discount cannot be negative.' });
+    }
+    // The deposit + discount can never exceed the base fee — that would
+    // make the outstanding balance negative (patient owed money).
+    if (roundMoney(fee - DEPOSIT_AMOUNT - discount) < 0) {
+      return res.status(400).json({
+        message:
+          'The service fee must be at least the ৳100 deposit plus any discount.',
+      });
+    }
+    const note = typeof b.admin_note === 'string' ? b.admin_note.trim() : undefined;
+
+    const update = {
+      status: 'amount_assigned_awaiting_final_payment',
+      final_price: fee,
+      adjusted_discount: discount,
+    };
+    if (note !== undefined) update.admin_note = note;
+
+    // Atomic compare-and-swap. Price a booking that just cleared its deposit
+    // (`deposit_paid_admin_reviewing`) OR RE-price one already awaiting final
+    // payment (`amount_assigned_awaiting_final_payment`) — the admin can
+    // correct a fee the patient hasn't settled yet. We capture the prior
+    // status so the notification copy can distinguish "set" from "updated".
+    const PRICEABLE = [
+      'deposit_paid_admin_reviewing',
+      'amount_assigned_awaiting_final_payment',
+    ];
+    // `new: false` returns the PRE-update doc (atomically, or null if no CAS
+    // match) so we can tell a first-time price from a re-price by its prior
+    // status. We then read back the fresh doc for the response + notification.
+    const prior = await CareRequest.findOneAndUpdate(
+      { _id: req.params.id, status: { $in: PRICEABLE } },
+      { $set: update },
+      { new: false },
+    );
+    if (!prior) {
+      const exists = await CareRequest.exists({ _id: req.params.id });
+      return res.status(exists ? 409 : 404).json({
+        message: exists
+          ? 'This booking cannot be priced (deposit unpaid, or already paid/assigned).'
+          : 'Request not found',
+      });
+    }
+    const wasRepriced =
+      prior.status === 'amount_assigned_awaiting_final_payment';
+    const result = await CareRequest.findById(req.params.id);
+
+    // Notify the patient to review the (new or updated) invoice.
+    const io = req.app.get('io');
+    const patientId = result.patient_account_id;
+    if (patientId) {
+      const outstanding = Math.max(0, roundMoney(fee - DEPOSIT_AMOUNT - discount));
+      const title = wasRepriced
+        ? 'Your booking fee was updated'
+        : 'Your invoice is ready';
+      const body =
+        `Your care team ${wasRepriced ? 'updated' : 'set'} the fee for ` +
+        `${result.care_type || 'your booking'}. ` +
+        `Outstanding balance: ৳${outstanding}. Review & pay to confirm.`;
+      const payload = {
+        appointmentId: result._id.toString(),
+        requestId: result._id.toString(),
+        deepLink: 'invoice',
+      };
+      await safeEmitNotification(io, {
+        recipientId: patientId,
+        senderId: null,
+        title,
+        body,
+        type: 'payment',
+        payload,
+      });
+      // eslint-disable-next-line no-floating-promises
+      sendHighPriorityPush(patientId, title, body, {
+        click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        appointmentId: result._id.toString(),
+        deepLink: 'invoice',
+      });
+      if (io) {
+        io.to(userRoomFor(patientId)).emit('invoice:updated', {
+          appointmentId: result._id.toString(),
+          finalServiceFee: fee,
+          adjustedDiscount: discount,
+          outstanding,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    res.json(result.toJSON());
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /admin/requests/:id/cancel   { reason? }
+//
+// Administrative cancellation. Unlike the patient self-cancel
+// (`patient.js` — restricted to the pre-assignment `submitted`/`approved`
+// states), an admin can pull the plug on a request at ANY point in its
+// lifecycle short of a terminal state. Guarded by `requireRole('admin')`,
+// which also admits `support_member` and rejects everyone else with 403.
+//
+// Cancelling atomically:
+//   1. flips `status` → 'cancelled',
+//   2. RELEASES the locked provider/team assignment (clears all six
+//      `assigned_*` fields) so the request stops occupying a dispatch, and
+//   3. records who/why in the free-text `admin_note` (same field the
+//      patient/reject flows overload — no dedicated schema field).
+router.post('/requests/:id/cancel', requireRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Invalid request id' });
+    }
+    const reason =
+      typeof (req.body && req.body.reason) === 'string'
+        ? req.body.reason.trim()
+        : '';
+
+    // Atomic compare-and-swap guarded on non-terminal states. `new: false`
+    // returns the PRE-update doc so we can notify whoever was assigned at
+    // the moment of cancellation (their assignment is about to be cleared).
+    const prior = await CareRequest.findOneAndUpdate(
+      { _id: id, status: { $nin: TERMINAL } },
+      {
+        $set: {
+          status: 'cancelled',
+          admin_note: reason
+            ? `Cancelled by admin: ${reason}`
+            : 'Cancelled by admin',
+          assigned_doctor_id: null,
+          assigned_doctor_name: null,
+          assigned_nurse_id: null,
+          assigned_nurse_name: null,
+          assigned_helper_id: null,
+          assigned_helper_name: null,
+        },
+      },
+      { new: false },
+    );
+
+    if (!prior) {
+      // Distinguish "gone" (404) from "already terminal" (409) so the UI
+      // can explain why the cancel didn't take.
+      const exists = await CareRequest.exists({ _id: id });
+      return res.status(exists ? 409 : 404).json({
+        message: exists
+          ? 'This request can no longer be cancelled — it is already completed, cancelled or rejected.'
+          : 'Request not found',
+      });
+    }
+
+    const result = await CareRequest.findById(id);
+
+    // Best-effort realtime + notifications. A notification failure must
+    // never tank the state transition that already committed above.
+    const io = req.app.get('io');
+    const apptId = id.toString();
+
+    // Live tracking room — flips the patient's tracking screen instantly.
+    if (io) {
+      io.to(apptId).emit('appointment_status_change', {
+        appointmentId: apptId,
+        status: 'cancelled',
+        dbStatus: 'cancelled',
+        updatedBy: req.accountId,
+        updatedRole: req.accountRole,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Patient notification.
+    const patientId = result && result.patient_account_id;
+    if (patientId) {
+      const title = 'Your booking was cancelled';
+      const body = `Your ${result.care_type || 'booking'} was cancelled by the care team.`;
+      await safeEmitNotification(io, {
+        recipientId: patientId,
+        senderId: null,
+        title,
+        body,
+        type: 'appointment',
+        payload: { appointmentId: apptId, requestId: apptId, deepLink: 'tracking' },
+      });
+      // eslint-disable-next-line no-floating-promises
+      sendHighPriorityPush(patientId, title, body, {
+        click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        appointmentId: apptId,
+      });
+    }
+
+    // Notify each provider who was assigned at cancel time. The
+    // `assigned_*_id` fields are Provider ids; a provider session identifies
+    // itself by its Account id, which `loadProviderPair` resolves.
+    const releases = [
+      { id: prior.assigned_doctor_id, role: 'doctor' },
+      { id: prior.assigned_nurse_id, role: 'nurse' },
+      { id: prior.assigned_helper_id, role: 'helper' },
+    ].filter((r) => r.id);
+    for (const rel of releases) {
+      try {
+        const { account } = await loadProviderPair(rel.id, rel.role);
+        const accountId = account && account._id ? account._id.toString() : null;
+        if (!accountId) continue;
+        const title = 'A dispatch was cancelled';
+        const body = `Your assignment for ${result.patient_name || 'a patient'}'s ${result.care_type || 'visit'} was cancelled by an administrator.`;
+        await safeEmitNotification(io, {
+          recipientId: accountId,
+          senderId: null,
+          title,
+          body,
+          type: 'appointment',
+          payload: { appointmentId: apptId },
+        });
+        // eslint-disable-next-line no-floating-promises
+        sendHighPriorityPush(accountId, title, body, {
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+          appointmentId: apptId,
+        });
+      } catch (_) {
+        // Swallow per-provider notification failures — the cancel stands.
+      }
+    }
+
+    res.json(result.toJSON());
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // POST /admin/requests/:id/assign
 //   { doctor_id, doctor_name, helper_id?, helper_name?,
 //     nurse_id?, nurse_name?, final_price?,
@@ -385,7 +641,7 @@ router.post('/requests/:id/assign', async (req, res) => {
     // Manual-pricing gateway. Pricing authority now lives entirely with the
     // admin (the patient no longer offers a budget), so a positive final
     // service fee is mandatory at assignment time — reject null/empty/zero.
-    const amount = Number(b.final_price);
+    const amount = roundMoney(Number(b.final_price));
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({
         message: 'A final service fee greater than 0 is required to assign.',
@@ -493,7 +749,7 @@ router.post('/appointments/assign', async (req, res) => {
     }
     // Manual-pricing gateway — same contract as POST /requests/:id/assign:
     // a positive final service fee is mandatory at assignment time.
-    const amount = Number(b.finalPrice ?? b.final_price);
+    const amount = roundMoney(Number(b.finalPrice ?? b.final_price));
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({
         message: 'A final service fee greater than 0 is required to assign.',
@@ -941,7 +1197,7 @@ async function revenueIn(start, end) {
   ]);
   if (!result.length) return { revenue: 0, visits: 0 };
   return {
-    revenue: Number(result[0].revenue) || 0,
+    revenue: roundMoney(Number(result[0].revenue) || 0),
     visits: Number(result[0].visits) || 0,
   };
 }

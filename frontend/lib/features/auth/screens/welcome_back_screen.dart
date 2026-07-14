@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../../../core/config/support_config.dart';
 import '../../../core/models/user.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/mt_colors.dart';
@@ -146,7 +147,14 @@ class _WelcomeBackScreenState extends ConsumerState<WelcomeBackScreen> {
       // GoRouter's redirect picks the user's role-specific home now that
       // the session is in state.
       final user = ref.read(authTokenProvider).valueOrNull?.user;
-      context.go(user == null ? '/login' : routeForUser(user));
+      if (user == null) {
+        // We're already on /login — re-navigating here used to be the one
+        // remaining silent dead-end. Tell the user what went wrong instead.
+        _showLoginError(
+            'Sign-in completed but no profile was returned. Please try again.');
+        return;
+      }
+      context.go(routeForUser(user));
     } catch (e) {
       // Defensive — the notifier resolves to `false` rather than throwing,
       // but a transport/parse error must never crash the form silently.
@@ -169,7 +177,7 @@ class _WelcomeBackScreenState extends ConsumerState<WelcomeBackScreen> {
         lower.contains('not found') ||
         lower.contains('unauthor') ||
         lower.contains('password')) {
-      return 'Invalid phone number or password. Please try again.';
+      return 'Incorrect mobile number or password. Please try again.';
     }
     return raw;
   }
@@ -256,25 +264,31 @@ class _WelcomeBackScreenState extends ConsumerState<WelcomeBackScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const SizedBox(height: 8),
-                    const Center(child: HeartPulseBadge()),
-                    const SizedBox(height: 20),
-                    Center(
-                      child: Text(
-                        'Welcome Back',
-                        style: MtTextStyles.h1.copyWith(
-                          color: MtColors.ink,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 28,
+                    // Brand header — official Taafi logo with the Bangla
+                    // tagline directly beneath it.
+                    Column(
+                      children: [
+                        Image.asset(
+                          'assets/logo/taafi-logo.png',
+                          height: 112,
+                          fit: BoxFit.contain,
+                          // If the asset ever fails to load, fall back to
+                          // the hand-painted badge so the header never blanks.
+                          errorBuilder: (_, _, _) =>
+                              const HeartPulseBadge(size: 96),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Center(
-                      child: Text(
-                        'Sign in to continue your care',
-                        style: MtTextStyles.bodyMd
-                            .copyWith(color: MtColors.ink2),
-                      ),
+                        const SizedBox(height: 14),
+                        Text(
+                          kBrandTaglineBn,
+                          textAlign: TextAlign.center,
+                          style: MtTextStyles.bodyMd.copyWith(
+                            color: MtColors.ink2,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w400,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 24),
                     // Persistent error banner — pairs with the SnackBar
@@ -864,7 +878,7 @@ class _StaffOnlyNotice extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Staff accounts are provisioned by your Medi-Treat administrator. Reach out to your admin if you need access.',
+              'Staff accounts are provisioned by your Taafi administrator. Reach out to your admin if you need access.',
               style: MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
             ),
           ),

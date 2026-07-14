@@ -1,4 +1,4 @@
-package com.meditreat.medi_treat
+package com.taafi.app
 
 import io.flutter.embedding.android.FlutterActivity
 

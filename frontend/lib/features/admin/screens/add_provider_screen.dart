@@ -272,7 +272,7 @@ class _FormCard extends StatelessWidget {
                           label: 'Email',
                           child: TextFormField(
                             controller: emailCtrl,
-                            decoration: _decoration('name@medi-treat.app'),
+                            decoration: _decoration('name@taafi.app'),
                             keyboardType: TextInputType.emailAddress,
                             validator: _validateEmail,
                             autocorrect: false,
@@ -296,7 +296,7 @@ class _FormCard extends StatelessWidget {
                     label: 'Email',
                     child: TextFormField(
                       controller: emailCtrl,
-                      decoration: _decoration('name@medi-treat.app'),
+                      decoration: _decoration('name@taafi.app'),
                       keyboardType: TextInputType.emailAddress,
                       validator: _validateEmail,
                       autocorrect: false,

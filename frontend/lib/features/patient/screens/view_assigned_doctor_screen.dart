@@ -301,7 +301,7 @@ class _HeaderCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    'Verified by Medi-Treat',
+                    'Verified by Taafi',
                     style: MtTextStyles.bodySm.copyWith(
                       color: MtColors.brand,
                       fontWeight: FontWeight.w600,

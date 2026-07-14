@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../models/notification_item.dart';
 import '../providers/notification_provider.dart';
+import 'notification_format.dart';
 
 /// Unified notification inbox shared by all three roles. Renders a
 /// timeline-grouped list ("Today" / "Yesterday" / "Earlier") of
@@ -94,7 +94,7 @@ class _Body extends StatelessWidget {
       return const _EmptyView();
     }
 
-    final groups = _groupByDay(state.items);
+    final groups = groupNotificationsByDay(state.items);
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       itemCount: groups.length,
@@ -126,39 +126,6 @@ class _Body extends StatelessWidget {
     );
   }
 
-  List<_TimelineGroup> _groupByDay(List<NotificationItem> items) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-    final todayItems = <NotificationItem>[];
-    final yesterdayItems = <NotificationItem>[];
-    final earlierItems = <NotificationItem>[];
-    for (final n in items) {
-      final t = n.timestamp.toLocal();
-      final d = DateTime(t.year, t.month, t.day);
-      if (d == today) {
-        todayItems.add(n);
-      } else if (d == yesterday) {
-        yesterdayItems.add(n);
-      } else {
-        earlierItems.add(n);
-      }
-    }
-    return [
-      if (todayItems.isNotEmpty)
-        _TimelineGroup(label: 'Today', items: todayItems),
-      if (yesterdayItems.isNotEmpty)
-        _TimelineGroup(label: 'Yesterday', items: yesterdayItems),
-      if (earlierItems.isNotEmpty)
-        _TimelineGroup(label: 'Earlier', items: earlierItems),
-    ];
-  }
-}
-
-class _TimelineGroup {
-  final String label;
-  final List<NotificationItem> items;
-  const _TimelineGroup({required this.label, required this.items});
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +139,7 @@ class _NotificationCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final palette = _paletteFor(item.kind);
-    final timeLabel = _relativeTime(item.timestamp);
+    final timeLabel = notificationRelativeTime(item.timestamp);
 
     return Material(
       color: MtColors.surface,
@@ -276,15 +243,6 @@ class _NotificationCard extends ConsumerWidget {
     }
   }
 
-  static String _relativeTime(DateTime when) {
-    final local = when.toLocal();
-    final diff = DateTime.now().difference(local);
-    if (diff.inSeconds < 60) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-    if (diff.inHours < 24) return '${diff.inHours} hr ago';
-    if (diff.inDays < 7) return '${diff.inDays} d ago';
-    return DateFormat('MMM d').format(local);
-  }
 }
 
 class _IconCircle extends StatelessWidget {

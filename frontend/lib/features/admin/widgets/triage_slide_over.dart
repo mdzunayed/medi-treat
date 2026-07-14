@@ -72,9 +72,64 @@ class TriageSlideOver extends ConsumerWidget {
     }
   }
 
+  Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Cancel booking ${request.id}?', style: MtTextStyles.h3),
+        content: Text(
+          'The booking will be cancelled, any assigned team released, and the '
+          'patient notified. This cannot be undone.',
+          style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text('Keep booking', style: MtTextStyles.labelMd),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(foregroundColor: MtColors.rejected),
+            child: Text('Cancel booking', style: MtTextStyles.labelMd),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    try {
+      await ref
+          .read(adminRequestsProvider.notifier)
+          .cancelBooking(request.id);
+      if (!context.mounted) return;
+      Navigator.of(context).pop();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Booking ${request.id} cancelled'),
+          backgroundColor: MtColors.completed,
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Could not cancel: $e'),
+          backgroundColor: MtColors.rejected,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isPending = request.status == 'pending';
+    // Terminal bookings can't be cancelled; pending ones use "Reject" (their
+    // pre-processing equivalent), so the admin Cancel action targets bookings
+    // that are actively being processed.
+    const terminal = {'completed', 'cancelled', 'rejected'};
+    final canCancel = !isPending && !terminal.contains(request.status);
 
     return Align(
       alignment: Alignment.centerRight,
@@ -284,8 +339,22 @@ class TriageSlideOver extends ConsumerWidget {
                       ),
                     ),
                   ],
-                  const SizedBox(width: 12),
-                  if (isPending)
+                  if (canCancel) ...[
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => _confirmCancel(context, ref),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: MtColors.rejected,
+                          side: const BorderSide(color: MtColors.rejected),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text('Cancel booking'),
+                      ),
+                    ),
+                  ],
+                  if (isPending) ...[
+                    const SizedBox(width: 12),
                     Expanded(
                       flex: 2,
                       child: ElevatedButton(
@@ -296,6 +365,7 @@ class TriageSlideOver extends ConsumerWidget {
                         child: const Text('Assign team'),
                       ),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -344,6 +414,10 @@ class _StatusBadge extends StatelessWidget {
         sBgColor = const Color(0xFFDCF3E7);
         break;
       case 'rejected':
+        sColor = MtColors.rejected;
+        sBgColor = const Color(0xFFFEE2E2);
+        break;
+      case 'cancelled':
         sColor = MtColors.rejected;
         sBgColor = const Color(0xFFFEE2E2);
         break;

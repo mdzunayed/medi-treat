@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
+import '../../../core/audio/notification_sound_service.dart';
 import '../../auth/auth_provider.dart';
 import '../models/message_model.dart';
 
@@ -108,32 +108,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
   io.Socket? _socket;
   bool _disposed = false;
 
-  // Single shared `AudioPlayer` instance — same pattern as the
-  // notification notifier. Playing through `lowLatency` keeps the
-  // first frame audible within the same socket-event tick.
-  final AudioPlayer _messageChime = AudioPlayer()
-    ..setReleaseMode(ReleaseMode.stop);
-
-  Future<void> _playMessageChime() async {
-    try {
-      await _messageChime.play(
-        AssetSource('sounds/notification_chime.mp3'),
-        mode: PlayerMode.lowLatency,
-      );
-    } catch (e) {
-      assert(() {
-        debugPrint('[chat] message chime failed: $e');
-        return true;
-      }());
-    }
-  }
-
   // The Dio client + the socket connection both target the same
   // backend host. We pull the base URL out of DioClient so a single
   // `--dart-define=API_BASE_URL=…` covers both transports.
   static const String _socketBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:4000',
+    defaultValue: 'http://localhost:5000',
   );
 
   Future<void> _bootstrap() async {
@@ -213,7 +193,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         // tap of "Send" would ring our own ears.
         if (isBrandNew && !incoming.isMine(args.currentUserId)) {
           // ignore: unawaited_futures
-          _playMessageChime();
+          ref.read(notificationSoundProvider).playBubble();
         }
       } catch (e) {
         assert(() {
@@ -346,9 +326,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
       }
       _socket = null;
     }
-    // Release the platform audio decoder.
-    // ignore: unawaited_futures
-    _messageChime.dispose();
     super.dispose();
   }
 }

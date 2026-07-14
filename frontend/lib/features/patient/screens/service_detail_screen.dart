@@ -7,7 +7,7 @@ import '../../../core/models/service_catalog_item.dart';
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/mt_button.dart';
-import '../booking_prefill_provider.dart';
+import '../new_request/new_request_notifier.dart';
 
 final _moneyFmt = NumberFormat('#,###', 'en_US');
 String _money(num n) => '৳${_moneyFmt.format(n.round())}';
@@ -18,7 +18,7 @@ class ServiceDetailScreen extends ConsumerWidget {
   const ServiceDetailScreen({super.key, required this.item});
 
   void _book(BuildContext context, WidgetRef ref) {
-    ref.read(servicePrefillProvider.notifier).state = item;
+    ref.read(newRequestProvider.notifier).applyServicePrefill(item);
     // Return true so the home tab can switch to "New Request" from a context
     // that still has access to the DefaultTabController.
     Navigator.of(context).pop(true);

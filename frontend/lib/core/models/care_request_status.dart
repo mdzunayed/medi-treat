@@ -10,6 +10,21 @@
 class CareRequestStatus {
   CareRequestStatus._();
 
+  /// Two-phase booking confirmation states (see CareRequest.js enum).
+  ///
+  /// Phase 1 — booking created but the fixed ৳100 confirmation deposit has
+  /// NOT been paid yet. The slot is not locked and admins don't see it.
+  static const String awaitingDeposit = 'awaiting_deposit';
+
+  /// Phase 1 complete — ৳100 deposit confirmed; the booking is in the
+  /// admin care-management review queue awaiting a final service fee.
+  static const String depositPaidAdminReviewing = 'deposit_paid_admin_reviewing';
+
+  /// Phase 2 — admin assigned the final fee; the patient sees the dynamic
+  /// invoice and must pay the outstanding balance to proceed.
+  static const String amountAssignedAwaitingFinalPayment =
+      'amount_assigned_awaiting_final_payment';
+
   /// Just submitted by the patient — awaiting admin triage.
   static const String submitted = 'submitted';
 

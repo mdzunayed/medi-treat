@@ -10,8 +10,8 @@ import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
 import '../../appointments/providers/feedback_provider.dart';
 import '../../chat/archive/archived_chat_screen.dart';
-import '../booking_prefill_provider.dart';
 import '../navigation/patient_nav_provider.dart';
+import '../new_request/new_request_notifier.dart';
 import 'doctor_portfolio_sheet.dart';
 import 'patient_history_provider.dart';
 
@@ -113,7 +113,7 @@ class _BookAgainLink extends ConsumerWidget {
     for (final s in services) {
       if (s.title.trim().toLowerCase() ==
           appointment.careType.trim().toLowerCase()) {
-        ref.read(servicePrefillProvider.notifier).state = s;
+        ref.read(newRequestProvider.notifier).applyServicePrefill(s);
         break;
       }
     }

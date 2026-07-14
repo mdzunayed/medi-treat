@@ -9,8 +9,8 @@ import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/mt_error_state.dart';
 import '../../../core/widgets/shimmer_loading_placeholder.dart';
-import '../booking_prefill_provider.dart';
 import '../navigation/patient_nav_provider.dart';
+import '../new_request/new_request_notifier.dart';
 
 final _priceFmt = NumberFormat('#,###', 'en_US');
 String _money(num n) => '৳${_priceFmt.format(n.round())}';
@@ -24,7 +24,7 @@ class ServiceCatalogScreen extends ConsumerWidget {
 
   void _openService(BuildContext context, WidgetRef ref, ServiceCatalogItem s) {
     HapticFeedback.lightImpact();
-    ref.read(servicePrefillProvider.notifier).state = s;
+    ref.read(newRequestProvider.notifier).applyServicePrefill(s);
     ref.goToNewRequest();
     Navigator.of(context).pop();
   }

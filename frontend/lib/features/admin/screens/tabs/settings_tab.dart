@@ -82,7 +82,7 @@ class SettingsTab extends ConsumerWidget {
 
     return AdminListScaffold(
       title: 'Settings',
-      subtitle: 'Operational toggles for the Medi-Treat console',
+      subtitle: 'Operational toggles for the Taafi console',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -330,7 +330,7 @@ class _OnboardAdminDialogState extends ConsumerState<_OnboardAdminDialog> {
                   _OnboardField(
                     controller: _email,
                     label: 'Email',
-                    hint: 'admin@meditreat.app',
+                    hint: 'admin@taafi.app',
                     keyboardType: TextInputType.emailAddress,
                     validator: (v) {
                       final s = (v ?? '').trim();

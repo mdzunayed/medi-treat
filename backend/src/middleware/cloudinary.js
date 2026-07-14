@@ -43,7 +43,7 @@ function uploadBuffer(buffer, publicId) {
     const stream = cloudinary.uploader.upload_stream(
       {
         public_id: publicId,
-        folder: 'meditreat',
+        folder: 'taafi',
         overwrite: true,
         invalidate: true,
         resource_type: 'image',
@@ -62,7 +62,7 @@ function uploadBuffer(buffer, publicId) {
 async function destroy(publicId) {
   if (!enabled) return;
   try {
-    await cloudinary.uploader.destroy(`meditreat/${publicId}`, {
+    await cloudinary.uploader.destroy(`taafi/${publicId}`, {
       invalidate: true,
     });
   } catch (_) {

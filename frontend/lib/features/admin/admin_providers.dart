@@ -273,11 +273,37 @@ class AdminRequestsNotifier extends AsyncNotifier<List<AdminCareRequest>> {
       // Reconcile asynchronously — don't await; the optimistic state
       // is already correct for everything UI-visible.
       unawaited(_silentDiffPull());
-    } catch (e, st) {
+    } catch (_) {
       // Roll back to the pre-mutation snapshot so the table doesn't
-      // show a flip that never persisted server-side.
+      // show a flip that never persisted server-side, then rethrow so
+      // the caller surfaces a SnackBar. Flipping this shared provider
+      // to AsyncError would unmount the whole requests table over one
+      // failed action.
       state = AsyncData(previous);
-      state = AsyncError(e, st);
+      rethrow;
+    }
+  }
+
+  /// Optimistic administrative cancellation. Same pattern as
+  /// [bulkUpdateStatus] but routes through the dedicated cancel endpoint,
+  /// which also releases the assigned provider/team and notifies everyone.
+  Future<void> cancelBooking(String id, {String? reason}) async {
+    final previous = state.valueOrNull;
+    if (previous == null) return;
+
+    state = AsyncData(
+      previous
+          .map((r) => r.id == id ? r.copyWith(status: 'cancelled') : r)
+          .toList(growable: false),
+    );
+
+    try {
+      await ref.read(dioClientProvider).adminCancelBooking(id, reason: reason);
+      unawaited(_silentDiffPull());
+    } catch (_) {
+      // Same rollback-and-rethrow contract as [bulkUpdateStatus].
+      state = AsyncData(previous);
+      rethrow;
     }
   }
 

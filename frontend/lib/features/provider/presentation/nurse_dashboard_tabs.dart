@@ -10,6 +10,7 @@ import '../../../core/models/doctor_dashboard.dart';
 import '../../../core/models/doctor_stats.dart';
 import '../../../core/models/patient_history_item.dart';
 import '../../../core/models/provider_earnings.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_colors.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
@@ -375,8 +376,8 @@ class _DispatchCardState extends ConsumerState<_DispatchCard> {
               InitialsAvatar(
                 name: _appt.patientName,
                 size: 48,
-                backgroundColor: const Color(0xFFDBEAFE),
-                textColor: const Color(0xFF1D4ED8),
+                backgroundColor: context.appColors.infoBg,
+                textColor: context.appColors.info,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -580,8 +581,8 @@ class _IncomingDispatchCardState
                     InitialsAvatar(
                       name: _appt.patientName,
                       size: 48,
-                      backgroundColor: const Color(0xFFDBEAFE),
-                      textColor: const Color(0xFF1D4ED8),
+                      backgroundColor: context.appColors.infoBg,
+                      textColor: context.appColors.info,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -763,11 +764,12 @@ class _HistoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final date = DateFormat('MMM d, yyyy').format(item.updatedAt.toLocal());
+    final c = context.appColors;
     final (statusFg, statusBg) = switch (item.status) {
-      'completed' => (MtColors.completed, MtColors.completedBg),
-      'cancelled' => (MtColors.ink3, MtColors.bg),
-      'rejected' => (MtColors.rejected, const Color(0xFFFEE2E2)),
-      _ => (MtColors.ink3, MtColors.bg),
+      'completed' => (c.positive, c.positiveBg),
+      'cancelled' => (c.muted, c.surfaceHi),
+      'rejected' => (c.danger, c.dangerBg),
+      _ => (c.muted, c.surfaceHi),
     };
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -914,7 +916,7 @@ class _PayoutLedger extends StatelessWidget {
               child: _LedgerTotalCard(
                 label: 'TOTAL SETTLED',
                 value: _money(ledger.totalSettled),
-                accent: const Color(0xFF059669),
+                accent: context.appColors.positive,
                 icon: Icons.verified_rounded,
               ),
             ),
@@ -923,7 +925,7 @@ class _PayoutLedger extends StatelessWidget {
               child: _LedgerTotalCard(
                 label: 'PENDING',
                 value: _money(ledger.totalPending),
-                accent: const Color(0xFFD97706),
+                accent: context.appColors.warning,
                 icon: Icons.hourglass_bottom_rounded,
               ),
             ),
@@ -1034,10 +1036,9 @@ class _LedgerPayoutRow extends StatelessWidget {
     final date = item.completedAt;
     final dateLabel = date == null ? '—' : DateFormat('d MMM y').format(date);
     final settled = item.settled;
-    final badgeColor =
-        settled ? const Color(0xFF059669) : const Color(0xFFD97706);
-    final badgeBg =
-        settled ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7);
+    final c = context.appColors;
+    final badgeColor = settled ? c.positive : c.warning;
+    final badgeBg = settled ? c.positiveBg : c.warningBg;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
@@ -1198,7 +1199,7 @@ class _RatingCard extends StatelessWidget {
                       Icon(
                         i < full ? Icons.star_rounded : Icons.star_outline_rounded,
                         size: 18,
-                        color: const Color(0xFFF59E0B),
+                        color: context.appColors.warning,
                       ),
                   ],
                 ),
@@ -1290,15 +1291,16 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     final (label, fg, bg) = switch (status) {
-      CareRequestStatus.assigned => ('ASSIGNED', MtColors.brand700, MtColors.brandSoft),
+      CareRequestStatus.assigned =>
+        ('ASSIGNED', c.accent, c.accent.withValues(alpha: 0.15)),
       CareRequestStatus.enroute ||
-      CareRequestStatus.onTheWay =>
-        ('ON THE WAY', const Color(0xFF1D4ED8), const Color(0xFFEFF6FF)),
-      CareRequestStatus.arrived => ('ARRIVED', MtColors.brand, MtColors.brandSoft),
-      CareRequestStatus.inService =>
-        ('IN SERVICE', const Color(0xFF6B21A8), const Color(0xFFF3E8FF)),
-      _ => (status.toUpperCase(), MtColors.ink3, MtColors.bg),
+      CareRequestStatus.onTheWay => ('ON THE WAY', c.info, c.infoBg),
+      CareRequestStatus.arrived =>
+        ('ARRIVED', c.accent, c.accent.withValues(alpha: 0.15)),
+      CareRequestStatus.inService => ('IN SERVICE', c.brand, c.glow),
+      _ => (status.toUpperCase(), c.muted, c.surfaceHi),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

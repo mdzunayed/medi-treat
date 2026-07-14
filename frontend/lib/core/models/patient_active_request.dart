@@ -47,6 +47,22 @@ class PatientActiveRequest extends Equatable {
   final int? durationHours;
   final int? offer;
 
+  /// Raw `care_requests.status` wire string (e.g. `awaiting_deposit`,
+  /// `deposit_paid_admin_reviewing`, `amount_assigned_awaiting_final_payment`).
+  /// Kept alongside the coarse [status] enum (which collapses the two-phase
+  /// booking states into `pendingReview`) so the two-phase booking surface
+  /// can branch precisely. Empty for legacy payloads.
+  final String rawStatus;
+
+  /// Two-phase confirmation deposit + dynamic-invoice fields. Populated once
+  /// the deposit is paid / the admin prices the booking; null/0 before then.
+  final double depositAmount;
+  final double? finalServiceFee;
+  final double? adjustedDiscount;
+
+  /// Patient's phone (surfaced so the admin review portal can call/text).
+  final String? patientPhone;
+
   final DateTime updatedAt;
 
   const PatientActiveRequest({
@@ -69,7 +85,21 @@ class PatientActiveRequest extends Equatable {
     this.reviewEtaMinutes,
     this.durationHours,
     this.offer,
+    this.rawStatus = '',
+    this.depositAmount = 0,
+    this.finalServiceFee,
+    this.adjustedDiscount,
+    this.patientPhone,
   });
+
+  /// Outstanding balance the patient still owes after the admin prices the
+  /// booking: base fee − deposit − discount. Never negative.
+  double get outstandingBalance {
+    final fee = finalServiceFee ?? 0;
+    final discount = adjustedDiscount ?? 0;
+    final owed = fee - depositAmount - discount;
+    return owed < 0 ? 0 : owed;
+  }
 
   PatientActiveRequest copyWith({
     PatientRequestStatus? status,
@@ -100,6 +130,11 @@ class PatientActiveRequest extends Equatable {
       reviewEtaMinutes: reviewEtaMinutes ?? this.reviewEtaMinutes,
       durationHours: durationHours,
       offer: offer,
+      rawStatus: rawStatus,
+      depositAmount: depositAmount,
+      finalServiceFee: finalServiceFee,
+      adjustedDiscount: adjustedDiscount,
+      patientPhone: patientPhone,
     );
   }
 
@@ -123,6 +158,11 @@ class PatientActiveRequest extends Equatable {
         reviewEtaMinutes,
         durationHours,
         offer,
+        rawStatus,
+        depositAmount,
+        finalServiceFee,
+        adjustedDiscount,
+        patientPhone,
         updatedAt,
       ];
 
@@ -149,6 +189,11 @@ class PatientActiveRequest extends Equatable {
       reviewEtaMinutes: (json['reviewEtaMinutes'] as num?)?.toInt(),
       durationHours: (json['durationHours'] as num?)?.toInt(),
       offer: (json['offer'] as num?)?.toInt(),
+      rawStatus: json['rawStatus']?.toString() ?? '',
+      depositAmount: (json['depositAmount'] as num?)?.toDouble() ?? 0,
+      finalServiceFee: (json['finalServiceFee'] as num?)?.toDouble(),
+      adjustedDiscount: (json['adjustedDiscount'] as num?)?.toDouble(),
+      patientPhone: json['patientPhone']?.toString(),
       updatedAt: parseOptional(json['updatedAt']) ?? DateTime.now(),
     );
   }
@@ -170,6 +215,11 @@ class PatientActiveRequest extends Equatable {
         'reviewEtaMinutes': reviewEtaMinutes,
         'durationHours': durationHours,
         'offer': offer,
+        'rawStatus': rawStatus,
+        'depositAmount': depositAmount,
+        'finalServiceFee': finalServiceFee,
+        'adjustedDiscount': adjustedDiscount,
+        'patientPhone': patientPhone,
         'updatedAt': updatedAt.toIso8601String(),
       };
 }

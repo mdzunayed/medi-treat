@@ -1,13 +1,19 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../../features/auth/auth_provider.dart';
+import '../storage/app_prefs.dart';
 
+// Same origin as the REST client (DioClient._baseUrl) — the socket and the
+// API must point at the same backend. Both read the single `API_BASE_URL`
+// define, so `--dart-define=API_BASE_URL=http://localhost:5000` steers both at
+// once; this default only applies when no define is passed (deployed builds).
 const String _socketBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'http://localhost:4000',
+  defaultValue: 'http://localhost:5000',
 );
 
 /// An incoming dispatch pushed by the backend over `dispatch:incoming` the
@@ -76,8 +82,21 @@ class SocketManager {
           .disableAutoConnect()
           .enableReconnection()
           .setReconnectionDelay(1500)
+          // Bounded retries: without a cap a rejected handshake (dead JWT,
+          // backend down) silently re-dials every 1.5 s forever. A refreshed
+          // token rebuilds the whole manager via socketManagerProvider, which
+          // resets this budget.
+          .setReconnectionAttempts(10)
           .build(),
     );
+
+    socket.onConnectError((err) {
+      if (_disposed) return;
+      assert(() {
+        debugPrint('[socket] connect error: $err');
+        return true;
+      }());
+    });
 
     socket.onConnect((_) {
       if (_disposed) return;
@@ -137,9 +156,13 @@ class SocketManager {
 /// is signed in. Rebuilds (reconnects) when the auth token changes and is
 /// disposed when no longer watched.
 final socketManagerProvider = Provider.autoDispose<SocketManager?>((ref) {
-  final auth = ref.watch(authTokenProvider).valueOrNull;
-  final token = auth?.token;
-  final accountId = auth?.user.id;
+  // The LIVE JWT comes from the [tokenProvider] leaf — the same source the
+  // Dio interceptor reads. A silent 401 refresh updates only that leaf (it
+  // never touches authTokenProvider), so watching it here is what lets the
+  // socket rebuild with the fresh token instead of reconnect-looping on the
+  // dead one. Session expiry nulls the leaf → socket tears down too.
+  final token = ref.watch(tokenProvider);
+  final accountId = ref.watch(authTokenProvider).valueOrNull?.user.id;
   if (token == null ||
       token.isEmpty ||
       accountId == null ||
