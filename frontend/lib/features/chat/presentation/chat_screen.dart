@@ -5,11 +5,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/config/support_config.dart';
 import '../../../core/models/assigned_doctor.dart';
-import '../../../core/theme/mt_colors.dart';
+import '../../../core/theme/app_colors_ext.dart';
 import '../../../core/theme/mt_text_styles.dart';
 import '../../../core/widgets/initials_avatar.dart';
 import '../../../core/widgets/vitals_grid.dart';
 import '../models/message_model.dart';
+import '../providers/active_chat_provider.dart';
 import '../providers/chat_provider.dart';
 
 // Re-export the shared [PatientVitals] + [VitalsGrid] so existing
@@ -22,12 +23,70 @@ export '../../../core/widgets/vitals_grid.dart' show PatientVitals, VitalsGrid;
 /// credential card) and the role-specific app bar action.
 enum ChatRole { patient, doctor }
 
+/// Theme-reactive color resolver for the chat surface. Field names mirror
+/// the legacy `MtColors` tokens so the migration was a mechanical swap, but
+/// every value now comes from the light/dark [AppColors] extension — this
+/// is what makes the whole screen flip to the dark obsidian canvas
+/// (`#0D151C`) with the vibrant `#F36512` orange accent. Build one per
+/// `build` via `final cc = _ChatColors.of(context);`.
+class _ChatColors {
+  final Color bg;
+  final Color surface;
+  final Color surfaceHi;
+  final Color ink;
+  final Color ink2;
+  final Color ink3;
+  final Color line;
+  final Color brand;
+  final Color brandSoft;
+  final Color brandSofter;
+  final Color onBrand;
+
+  const _ChatColors({
+    required this.bg,
+    required this.surface,
+    required this.surfaceHi,
+    required this.ink,
+    required this.ink2,
+    required this.ink3,
+    required this.line,
+    required this.brand,
+    required this.brandSoft,
+    required this.brandSofter,
+    required this.onBrand,
+  });
+
+  factory _ChatColors.of(BuildContext context) {
+    final a = context.appColors;
+    return _ChatColors(
+      bg: a.canvas,
+      surface: a.surface,
+      surfaceHi: a.surfaceHi,
+      ink: a.title,
+      ink2: a.body,
+      ink3: a.muted,
+      line: a.cardBorder,
+      brand: a.accent,
+      brandSoft: a.accent.withValues(alpha: 0.28),
+      brandSofter: a.accent.withValues(alpha: 0.12),
+      onBrand: a.onAccent,
+    );
+  }
+}
+
 /// Premium real-time consultation console. Responsive: a single column
 /// on mobile (< 768 px) and a 65/35 split with a fixed context sidebar
 /// on desktop / web. Powered by [chatProvider] — same as the original
 /// surface, only the visual shell changes.
 class ChatScreen extends ConsumerStatefulWidget {
+  /// Appointment-chat mode: the CareRequest id. Empty in conversation mode.
   final String appointmentId;
+
+  /// Conversation-engine mode: the thread id. When set, the screen drives a
+  /// multi-role / group thread (`conversation:*` events) and hides the
+  /// appointment-specific context sidebar.
+  final String? conversationId;
+
   final String currentUserId;
   final String otherUserId;
   final String otherUserName;
@@ -60,9 +119,10 @@ class ChatScreen extends ConsumerStatefulWidget {
 
   const ChatScreen({
     super.key,
-    required this.appointmentId,
+    this.appointmentId = '',
+    this.conversationId,
     required this.currentUserId,
-    required this.otherUserId,
+    this.otherUserId = '',
     required this.otherUserName,
     this.otherUserAvatarUrl,
     this.otherUserSubtitle,
@@ -92,12 +152,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   ChatArgs get _args => ChatArgs(
         appointmentId: widget.appointmentId,
+        conversationId: widget.conversationId,
         currentUserId: widget.currentUserId,
         otherUserId: widget.otherUserId,
       );
 
+  /// Normalised key for the thread this screen shows. Registered with
+  /// [activeChatProvider] so the app-wide chime stays silent while we're
+  /// the focused room.
+  String? get _threadKey => chatThreadKey(
+        conversationId: widget.conversationId,
+        appointmentId: widget.appointmentId,
+      );
+
+  @override
+  void initState() {
+    super.initState();
+    final key = _threadKey;
+    if (key != null) {
+      // Defer past the first build — mutating a provider synchronously in
+      // initState would fire mid-build.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.read(activeChatProvider.notifier).enter(key);
+      });
+    }
+  }
+
   @override
   void dispose() {
+    final key = _threadKey;
+    if (key != null) ref.read(activeChatProvider.notifier).leave(key);
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
@@ -148,11 +232,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     final state = ref.watch(chatProvider(_args));
     _maybeScrollToBottom(state.messages.length);
 
     return Scaffold(
-      backgroundColor: MtColors.bg,
+      backgroundColor: cc.bg,
       appBar: _ChatAppBar(
         name: widget.otherUserName,
         avatarUrl: widget.otherUserAvatarUrl,
@@ -182,7 +267,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               maxThreadWidth: _chatColumnMaxWidth,
             );
 
-            if (!isDesktop) {
+            // Conversation-engine threads are multi-role / group — the
+            // appointment-specific context sidebar (patient vitals /
+            // assigned-doctor card) doesn't apply, so always render the
+            // single-column chat pane regardless of width.
+            if (!isDesktop || widget.conversationId != null) {
               return chatPane;
             }
 
@@ -190,7 +279,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(flex: 65, child: chatPane),
-                Container(width: 1, color: MtColors.line),
+                Container(width: 1, color: cc.line),
                 Expanded(
                   flex: 35,
                   child: _ContextSidebar(
@@ -243,16 +332,17 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     final statusLabel = isConnected
         ? (role == ChatRole.doctor ? 'Active Sync' : 'Online & Connected')
         : 'Reconnecting…';
     final statusColor = isConnected
         ? (role == ChatRole.doctor ? const Color(0xFF3B82F6) : const Color(0xFF10B981))
-        : MtColors.ink3;
+        : cc.ink3;
 
     return AppBar(
-      backgroundColor: MtColors.surface,
-      foregroundColor: MtColors.ink,
+      backgroundColor: cc.surface,
+      foregroundColor: cc.ink,
       elevation: 0,
       titleSpacing: 0,
       title: Row(
@@ -266,7 +356,7 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
               children: [
                 Text(
                   name,
-                  style: MtTextStyles.labelLg.copyWith(color: MtColors.ink),
+                  style: MtTextStyles.labelLg.copyWith(color: cc.ink),
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 3),
@@ -278,7 +368,7 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                       child: Text(
                         statusLabel,
                         style: MtTextStyles.bodySm.copyWith(
-                          color: MtColors.ink2,
+                          color: cc.ink2,
                           fontWeight: FontWeight.w500,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -313,7 +403,7 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
-        child: Container(height: 1, color: MtColors.line),
+        child: Container(height: 1, color: cc.line),
       ),
     );
   }
@@ -331,12 +421,13 @@ class _RoleActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return ElevatedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18),
       label: Text(label, style: MtTextStyles.labelMd),
       style: ElevatedButton.styleFrom(
-        backgroundColor: MtColors.brand,
+        backgroundColor: cc.brand,
         foregroundColor: Colors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -516,9 +607,10 @@ class _ChatBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     if (state.status == ChatStatus.loading && state.messages.isEmpty) {
-      return const Center(
-        child: CircularProgressIndicator(color: MtColors.brand),
+      return Center(
+        child: CircularProgressIndicator(color: cc.brand),
       );
     }
     if (state.status == ChatStatus.error && state.messages.isEmpty) {
@@ -592,6 +684,7 @@ class _DateChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     final now = DateTime.now();
     final isToday = now.year == date.year &&
         now.month == date.month &&
@@ -605,13 +698,13 @@ class _DateChip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           decoration: BoxDecoration(
-            color: MtColors.surface,
+            color: cc.surface,
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: MtColors.line),
+            border: Border.all(color: cc.line),
           ),
           child: Text(
             label,
-            style: MtTextStyles.bodySm.copyWith(color: MtColors.ink3),
+            style: MtTextStyles.bodySm.copyWith(color: cc.ink3),
           ),
         ),
       ),
@@ -638,6 +731,7 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     final timeLabel = DateFormat('h:mm a').format(message.timestamp.toLocal());
 
     // Corner radii per the spec — outgoing is square at bottom-right,
@@ -660,11 +754,11 @@ class _MessageBubble extends StatelessWidget {
       ),
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       decoration: BoxDecoration(
-        color: isMine ? MtColors.brand : const Color(0xFFF1F5F9), // ultra-soft neutral
+        color: isMine ? cc.brand : cc.surfaceHi, // theme-aware incoming tint
         borderRadius: bubbleShape,
         boxShadow: [
           BoxShadow(
-            color: (isMine ? MtColors.brand : MtColors.ink)
+            color: (isMine ? cc.brand : cc.ink)
                 .withValues(alpha: 0.06),
             blurRadius: 10,
             offset: const Offset(0, 4),
@@ -677,7 +771,7 @@ class _MessageBubble extends StatelessWidget {
           Text(
             message.messageText,
             style: MtTextStyles.bodyMd.copyWith(
-              color: isMine ? Colors.white : MtColors.ink,
+              color: isMine ? Colors.white : cc.ink,
               height: 1.35,
               fontWeight: FontWeight.w500,
             ),
@@ -694,7 +788,7 @@ class _MessageBubble extends StatelessWidget {
                   style: MtTextStyles.bodySm.copyWith(
                     color: isMine
                         ? Colors.white.withValues(alpha: 0.78)
-                        : MtColors.ink3,
+                        : cc.ink3,
                     fontSize: 10.5,
                     height: 1.0,
                   ),
@@ -805,9 +899,10 @@ class _FloatingInputBarState extends State<_FloatingInputBar> {
   }
 
   void _showAttachMenu(BuildContext context) {
+    final cc = _ChatColors.of(context);
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: MtColors.surface,
+      backgroundColor: cc.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -822,7 +917,7 @@ class _FloatingInputBarState extends State<_FloatingInputBar> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: MtColors.line,
+                    color: cc.line,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -859,6 +954,7 @@ class _FloatingInputBarState extends State<_FloatingInputBar> {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     final canSend = _hasText && !widget.isSending;
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -870,9 +966,9 @@ class _FloatingInputBarState extends State<_FloatingInputBar> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         decoration: BoxDecoration(
-          color: MtColors.surface,
+          color: cc.surface,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: MtColors.line),
+          border: Border.all(color: cc.line),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.05),
@@ -887,9 +983,9 @@ class _FloatingInputBarState extends State<_FloatingInputBar> {
             IconButton(
               onPressed: () => _showAttachMenu(context),
               tooltip: 'Quick actions',
-              icon: const Icon(
+              icon: Icon(
                 Icons.add_circle_outline,
-                color: MtColors.ink2,
+                color: cc.ink2,
               ),
             ),
             Expanded(
@@ -899,14 +995,14 @@ class _FloatingInputBarState extends State<_FloatingInputBar> {
                 minLines: 1,
                 maxLines: 5,
                 textInputAction: TextInputAction.newline,
-                style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink),
+                style: MtTextStyles.bodyMd.copyWith(color: cc.ink),
                 decoration: InputDecoration(
                   border: InputBorder.none,
                   isCollapsed: true,
                   contentPadding: const EdgeInsets.symmetric(vertical: 12),
                   hintText: 'Type a medical update…',
                   hintStyle:
-                      MtTextStyles.bodyMd.copyWith(color: MtColors.ink3),
+                      MtTextStyles.bodyMd.copyWith(color: cc.ink3),
                 ),
               ),
             ),
@@ -937,20 +1033,21 @@ class _AttachAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return ListTile(
       onTap: onTap,
       leading: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: MtColors.brandSofter,
+          color: cc.brandSofter,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(icon, color: MtColors.brand, size: 20),
+        child: Icon(icon, color: cc.brand, size: 20),
       ),
       title: Text(label, style: MtTextStyles.labelLg),
       subtitle: Text(
         description,
-        style: MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+        style: MtTextStyles.bodySm.copyWith(color: cc.ink2),
       ),
     );
   }
@@ -968,8 +1065,9 @@ class _AnimatedSendButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final background = enabled ? MtColors.brand : MtColors.brandSofter;
-    final iconColor = enabled ? Colors.white : MtColors.brand;
+    final cc = _ChatColors.of(context);
+    final background = enabled ? cc.brand : cc.brandSofter;
+    final iconColor = enabled ? Colors.white : cc.brand;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOut,
@@ -981,7 +1079,7 @@ class _AnimatedSendButton extends StatelessWidget {
         boxShadow: enabled
             ? [
                 BoxShadow(
-                  color: MtColors.brand.withValues(alpha: 0.32),
+                  color: cc.brand.withValues(alpha: 0.32),
                   blurRadius: 14,
                   offset: const Offset(0, 4),
                 ),
@@ -1049,8 +1147,9 @@ class _ContextSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Container(
-      color: MtColors.surface,
+      color: cc.surface,
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
         child: Column(
@@ -1059,7 +1158,7 @@ class _ContextSidebar extends StatelessWidget {
             Text(
               role == ChatRole.doctor ? 'PATIENT CONTEXT' : 'CONSULTATION',
               style: MtTextStyles.sectionLabel.copyWith(
-                color: MtColors.ink3,
+                color: cc.ink3,
                 letterSpacing: 1.1,
               ),
             ),
@@ -1103,6 +1202,7 @@ class _DoctorSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1121,7 +1221,7 @@ class _DoctorSidebar extends StatelessWidget {
                         Text(
                           patientName,
                           style: MtTextStyles.labelLg
-                              .copyWith(color: MtColors.ink),
+                              .copyWith(color: cc.ink),
                           overflow: TextOverflow.ellipsis,
                         ),
                         if ((careType ?? '').isNotEmpty) ...[
@@ -1129,7 +1229,7 @@ class _DoctorSidebar extends StatelessWidget {
                           Text(
                             careType!,
                             style: MtTextStyles.bodySm
-                                .copyWith(color: MtColors.ink2),
+                                .copyWith(color: cc.ink2),
                           ),
                         ],
                       ],
@@ -1170,11 +1270,12 @@ class _MapPlaceholderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFFEEF3EE),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: cc.line),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1186,24 +1287,24 @@ class _MapPlaceholderCard extends StatelessWidget {
                 Positioned.fill(
                   child: CustomPaint(painter: _MiniMapPainter()),
                 ),
-                const Center(
+                Center(
                   child: Icon(
                     Icons.location_on,
-                    color: MtColors.brand,
+                    color: cc.brand,
                     size: 30,
                   ),
                 ),
               ],
             ),
           ),
-          Container(height: 1, color: MtColors.line),
+          Container(height: 1, color: cc.line),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.place_outlined,
-                    size: 16, color: MtColors.ink2),
+                Icon(Icons.place_outlined,
+                    size: 16, color: cc.ink2),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -1211,7 +1312,7 @@ class _MapPlaceholderCard extends StatelessWidget {
                         ? 'Address shared at dispatch.'
                         : address!,
                     style: MtTextStyles.bodySm
-                        .copyWith(color: MtColors.ink2),
+                        .copyWith(color: cc.ink2),
                   ),
                 ),
               ],
@@ -1280,12 +1381,13 @@ class _PatientSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     final d = doctor;
     if (d == null) {
       return _SidebarCard(
         child: Text(
           'Your assigned doctor will appear here once the admin confirms the visit.',
-          style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+          style: MtTextStyles.bodyMd.copyWith(color: cc.ink2),
         ),
       );
     }
@@ -1300,14 +1402,14 @@ class _PatientSidebar extends StatelessWidget {
               Text(
                 d.fullName,
                 textAlign: TextAlign.center,
-                style: MtTextStyles.labelLg.copyWith(color: MtColors.ink),
+                style: MtTextStyles.labelLg.copyWith(color: cc.ink),
               ),
               if (d.specialty.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Text(
                   d.specialty,
                   textAlign: TextAlign.center,
-                  style: MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                  style: MtTextStyles.bodySm.copyWith(color: cc.ink2),
                 ),
               ],
               if (d.isVerifiedDoctor) ...[
@@ -1316,20 +1418,20 @@ class _PatientSidebar extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: MtColors.brandSofter,
+                    color: cc.brandSofter,
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: MtColors.brandSoft),
+                    border: Border.all(color: cc.brandSoft),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.verified,
-                          size: 14, color: MtColors.brand),
+                      Icon(Icons.verified,
+                          size: 14, color: cc.brand),
                       const SizedBox(width: 4),
                       Text(
                         'Verified by Taafi',
                         style: MtTextStyles.bodySm.copyWith(
-                          color: MtColors.brand,
+                          color: cc.brand,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1399,12 +1501,13 @@ class _SidebarCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: cc.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: cc.line),
       ),
       child: child,
     );
@@ -1417,10 +1520,11 @@ class _SidebarSectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Text(
       label.toUpperCase(),
       style: MtTextStyles.sectionLabel.copyWith(
-        color: MtColors.ink3,
+        color: cc.ink3,
         letterSpacing: 1.1,
       ),
     );
@@ -1439,22 +1543,23 @@ class _SidebarKeyValue extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: cc.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: cc.line),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: MtColors.brandSofter,
+              color: cc.brandSofter,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, color: MtColors.brand, size: 18),
+            child: Icon(icon, color: cc.brand, size: 18),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1464,14 +1569,14 @@ class _SidebarKeyValue extends StatelessWidget {
                 Text(
                   label,
                   style: MtTextStyles.sectionLabel.copyWith(
-                    color: MtColors.ink3,
+                    color: cc.ink3,
                     letterSpacing: 1.1,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   value,
-                  style: MtTextStyles.labelMd.copyWith(color: MtColors.ink),
+                  style: MtTextStyles.labelMd.copyWith(color: cc.ink),
                 ),
               ],
             ),
@@ -1489,24 +1594,25 @@ class _MiniStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
-        color: MtColors.surface,
+        color: cc.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: MtColors.line),
+        border: Border.all(color: cc.line),
       ),
       child: Column(
         children: [
           Text(
             value,
-            style: MtTextStyles.labelLg.copyWith(color: MtColors.ink),
+            style: MtTextStyles.labelLg.copyWith(color: cc.ink),
           ),
           const SizedBox(height: 2),
           Text(
             label,
             style: MtTextStyles.bodySm.copyWith(
-              color: MtColors.ink3,
+              color: cc.ink3,
               fontSize: 10.5,
             ),
           ),
@@ -1528,6 +1634,7 @@ class _SidebarPrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
@@ -1535,7 +1642,7 @@ class _SidebarPrimaryButton extends StatelessWidget {
         icon: Icon(icon, size: 18),
         label: Text(label, style: MtTextStyles.labelLg),
         style: ElevatedButton.styleFrom(
-          backgroundColor: MtColors.brand,
+          backgroundColor: cc.brand,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
@@ -1560,6 +1667,7 @@ class _SidebarSecondaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
@@ -1567,8 +1675,8 @@ class _SidebarSecondaryButton extends StatelessWidget {
         icon: Icon(icon, size: 18),
         label: Text(label, style: MtTextStyles.labelLg),
         style: OutlinedButton.styleFrom(
-          foregroundColor: MtColors.brand,
-          side: const BorderSide(color: MtColors.brand),
+          foregroundColor: cc.brand,
+          side: BorderSide(color: cc.brand),
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -1591,6 +1699,7 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     final cleaned = name.replaceFirst(RegExp(r'^[Dd]r\.?\s+'), '');
     final src = url;
     if (src != null && src.isNotEmpty) {
@@ -1603,7 +1712,7 @@ class _Avatar extends StatelessWidget {
           errorBuilder: (_, _, _) => InitialsAvatar(
             name: cleaned,
             size: size,
-            backgroundColor: MtColors.brand,
+            backgroundColor: cc.brand,
             textColor: Colors.white,
           ),
         ),
@@ -1612,7 +1721,7 @@ class _Avatar extends StatelessWidget {
     return InitialsAvatar(
       name: cleaned,
       size: size,
-      backgroundColor: MtColors.brand,
+      backgroundColor: cc.brand,
       textColor: Colors.white,
     );
   }
@@ -1623,6 +1732,7 @@ class _EmptyConversation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -1631,27 +1741,27 @@ class _EmptyConversation extends StatelessWidget {
           children: [
             Container(
               padding: const EdgeInsets.all(18),
-              decoration: const BoxDecoration(
-                color: MtColors.brandSofter,
+              decoration: BoxDecoration(
+                color: cc.brandSofter,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.chat_bubble_outline,
                 size: 32,
-                color: MtColors.brand,
+                color: cc.brand,
               ),
             ),
             const SizedBox(height: 14),
             Text(
               'Start the conversation',
-              style: MtTextStyles.h2.copyWith(color: MtColors.ink),
+              style: MtTextStyles.h2.copyWith(color: cc.ink),
             ),
             const SizedBox(height: 6),
             Text(
               'Messages you send here are delivered instantly and stay '
               'attached to this appointment.',
               textAlign: TextAlign.center,
-              style: MtTextStyles.bodyMd.copyWith(color: MtColors.ink2),
+              style: MtTextStyles.bodyMd.copyWith(color: cc.ink2),
             ),
           ],
         ),
@@ -1667,33 +1777,34 @@ class _ChatError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.cloud_off_outlined,
               size: 36,
-              color: MtColors.ink3,
+              color: cc.ink3,
             ),
             const SizedBox(height: 12),
             Text(
               "Couldn't load conversation",
-              style: MtTextStyles.labelLg.copyWith(color: MtColors.ink),
+              style: MtTextStyles.labelLg.copyWith(color: cc.ink),
             ),
             const SizedBox(height: 4),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+              style: MtTextStyles.bodySm.copyWith(color: cc.ink2),
             ),
             const SizedBox(height: 14),
             ElevatedButton(
               onPressed: () => onRetry(),
               style: ElevatedButton.styleFrom(
-                backgroundColor: MtColors.brand,
+                backgroundColor: cc.brand,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -1718,11 +1829,12 @@ class _ChatLockedFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cc = _ChatColors.of(context);
     return Container(
       width: double.infinity,
-      decoration: const BoxDecoration(
-        color: MtColors.surface,
-        border: Border(top: BorderSide(color: MtColors.line)),
+      decoration: BoxDecoration(
+        color: cc.surface,
+        border: Border(top: BorderSide(color: cc.line)),
       ),
       padding: EdgeInsets.fromLTRB(
         16,
@@ -1734,14 +1846,14 @@ class _ChatLockedFooter extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(8),
-            decoration: const BoxDecoration(
-              color: MtColors.brandSofter,
+            decoration: BoxDecoration(
+              color: cc.brandSofter,
               shape: BoxShape.circle,
             ),
-            child: const Icon(
+            child: Icon(
               Icons.lock_outline,
               size: 16,
-              color: MtColors.brand,
+              color: cc.brand,
             ),
           ),
           const SizedBox(width: 10),
@@ -1752,14 +1864,14 @@ class _ChatLockedFooter extends StatelessWidget {
                 Text(
                   'This visit has wrapped up.',
                   style: MtTextStyles.labelMd.copyWith(
-                    color: MtColors.ink,
+                    color: cc.ink,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   'The conversation is now read-only. Open a new request to chat with a provider again.',
-                  style: MtTextStyles.bodySm.copyWith(color: MtColors.ink2),
+                  style: MtTextStyles.bodySm.copyWith(color: cc.ink2),
                 ),
               ],
             ),

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
-import '../../../core/audio/notification_sound_service.dart';
+import '../../../core/storage/app_prefs.dart';
 import '../../auth/auth_provider.dart';
 import '../models/message_model.dart';
 
@@ -70,29 +70,45 @@ class ChatState {
   }
 }
 
-/// Per-conversation key — one `(appointmentId, currentUserId)` pair gets
-/// one notifier instance. `autoDispose` cleans the socket when the
-/// patient navigates away.
+/// Per-thread key — one `(appointmentId | conversationId, currentUserId)`
+/// pair gets one notifier instance. `autoDispose` cleans the socket when
+/// the user navigates away.
+///
+/// Two modes, selected by which id is supplied:
+///   • Appointment chat (legacy 1:1) — [appointmentId] + [otherUserId] set,
+///     [conversationId] null. Uses the `join_room` / `send_message` events.
+///   • Conversation engine (multi-role / group) — [conversationId] set,
+///     [appointmentId] empty. Uses the `conversation:*` events; there is no
+///     single [otherUserId] (fan-out is server-derived).
 class ChatArgs {
   final String appointmentId;
   final String currentUserId;
   final String otherUserId;
+  final String? conversationId;
 
   const ChatArgs({
-    required this.appointmentId,
+    this.appointmentId = '',
     required this.currentUserId,
-    required this.otherUserId,
+    this.otherUserId = '',
+    this.conversationId,
   });
+
+  /// True when this notifier drives a conversation-engine thread rather
+  /// than the legacy appointment chat.
+  bool get isConversation =>
+      conversationId != null && conversationId!.isNotEmpty;
 
   @override
   bool operator ==(Object other) =>
       other is ChatArgs &&
       other.appointmentId == appointmentId &&
       other.currentUserId == currentUserId &&
-      other.otherUserId == otherUserId;
+      other.otherUserId == otherUserId &&
+      other.conversationId == conversationId;
 
   @override
-  int get hashCode => Object.hash(appointmentId, currentUserId, otherUserId);
+  int get hashCode =>
+      Object.hash(appointmentId, currentUserId, otherUserId, conversationId);
 }
 
 /// Riverpod notifier driving the chat surface. Owns the Socket.io
@@ -134,7 +150,9 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   Future<void> _loadHistory() async {
     final client = ref.read(dioClientProvider);
-    final rawList = await client.getChatHistory(args.appointmentId);
+    final rawList = args.isConversation
+        ? await client.getConversationMessages(args.conversationId!)
+        : await client.getChatHistory(args.appointmentId);
     final parsed = <MessageModel>[];
     for (final raw in rawList) {
       try {
@@ -154,20 +172,33 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   void _connectSocket() {
     if (_socket != null) return;
-    final socket = io.io(
-      _socketBaseUrl,
-      io.OptionBuilder()
-          .setTransports(['websocket'])
-          .disableAutoConnect()
-          .enableReconnection()
-          .setReconnectionDelay(1500)
-          .build(),
-    );
+    // Attach the JWT when we have one so the backend can verify conversation
+    // membership + auto-join the user room. The legacy appointment path works
+    // with or without it (the server allows anonymous join_room sockets).
+    final token = ref.read(tokenProvider);
+    final optsBuilder = io.OptionBuilder()
+        .setTransports(['websocket'])
+        .disableAutoConnect()
+        .enableReconnection()
+        .setReconnectionDelay(1500);
+    if (token != null && token.isNotEmpty) {
+      optsBuilder.setAuth({'token': token});
+    }
+    final socket = io.io(_socketBaseUrl, optsBuilder.build());
 
     socket.onConnect((_) {
       if (_disposed) return;
       state = state.copyWith(isConnected: true);
-      socket.emit('join_room', args.appointmentId);
+      if (args.isConversation) {
+        socket.emit('conversation:join', args.conversationId);
+        // Opening the thread clears our unread badge for it.
+        socket.emit('conversation:read', {
+          'conversationId': args.conversationId,
+          'userId': args.currentUserId,
+        });
+      } else {
+        socket.emit('join_room', args.appointmentId);
+      }
     });
 
     socket.on('receive_message', (payload) {
@@ -181,20 +212,17 @@ class ChatNotifier extends StateNotifier<ChatState> {
         // collision for the fallback case).
         final list = [...state.messages];
         final existingIdx = list.indexWhere((m) => m.id == incoming.id);
-        final isBrandNew = existingIdx < 0;
         if (existingIdx >= 0) {
           list[existingIdx] = incoming;
         } else {
           list.add(incoming);
         }
         state = state.copyWith(messages: list);
-        // Sound feedback fires only when the message is BOTH new to
-        // this client AND not our own outbound echo — otherwise every
-        // tap of "Send" would ring our own ears.
-        if (isBrandNew && !incoming.isMine(args.currentUserId)) {
-          // ignore: unawaited_futures
-          ref.read(notificationSoundProvider).playBubble();
-        }
+        // No chime here on purpose: this listener only ever fires for the
+        // chat that's currently OPEN, and the spec wants the focused room
+        // silent. The app-wide notification hub owns the chime and rings
+        // only for threads you're NOT looking at (it consults
+        // `activeChatProvider`).
       } catch (e) {
         assert(() {
           debugPrint('[chat] failed to parse incoming message: $e');
@@ -216,6 +244,23 @@ class ChatNotifier extends StateNotifier<ChatState> {
       final wireStatus = payload['status']?.toString().toLowerCase();
       if (wireStatus == null || wireStatus.isEmpty) return;
       state = state.copyWith(appointmentStatus: wireStatus);
+    });
+
+    // Read receipt from another participant — flip our OWN sent messages to
+    // read so the delivery ticks turn blue. Only relevant in conversation
+    // mode; ignore our own read echoes.
+    socket.on('conversation:read', (payload) {
+      if (_disposed || !args.isConversation) return;
+      if (payload is! Map) return;
+      if (payload['conversationId']?.toString() != args.conversationId) return;
+      if (payload['userId']?.toString() == args.currentUserId) return;
+      final list = [
+        for (final m in state.messages)
+          m.isMine(args.currentUserId) && !m.isRead
+              ? m.copyWith(isRead: true)
+              : m,
+      ];
+      state = state.copyWith(messages: list);
     });
 
     socket.onDisconnect((_) {
@@ -257,14 +302,22 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
     state = state.copyWith(isSending: true);
     final completer = Completer<void>();
+    final event = args.isConversation ? 'conversation:send' : 'send_message';
+    final payload = args.isConversation
+        ? {
+            'conversationId': args.conversationId,
+            'senderId': args.currentUserId,
+            'messageText': trimmed,
+          }
+        : {
+            'appointmentId': args.appointmentId,
+            'senderId': args.currentUserId,
+            'receiverId': args.otherUserId,
+            'messageText': trimmed,
+          };
     socket.emitWithAck(
-      'send_message',
-      {
-        'appointmentId': args.appointmentId,
-        'senderId': args.currentUserId,
-        'receiverId': args.otherUserId,
-        'messageText': trimmed,
-      },
+      event,
+      payload,
       ack: (response) {
         if (_disposed) {
           if (!completer.isCompleted) completer.complete();
@@ -315,7 +368,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
     final socket = _socket;
     if (socket != null) {
       try {
-        socket.emit('leave_room', args.appointmentId);
+        if (args.isConversation) {
+          socket.emit('conversation:leave', args.conversationId);
+          socket.off('conversation:read');
+        } else {
+          socket.emit('leave_room', args.appointmentId);
+        }
         socket.off('receive_message');
         socket.off('appointment_status_change');
         socket.disconnect();

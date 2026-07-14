@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/audio/notification_sound_service.dart';
 import '../../../core/network/socket_manager.dart';
 import '../../auth/auth_provider.dart';
+import '../../chat/providers/active_chat_provider.dart';
 import '../models/notification_item.dart';
 
 /// Container for the notification hub state. Holds the full list plus
@@ -145,7 +146,13 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
         // mustn't chime. Unread arrivals that are echoes of our own
         // recent action (e.g. our own chat send) also shouldn't ring,
         // so we additionally gate on `isRead == false`.
-        if (isBrandNew && !item.isRead) {
+        //
+        // Chat pushes carry the extra rule from the spec: stay SILENT for
+        // the exact thread the user is already looking at (the backend fans
+        // a `new_notification` to every recipient regardless of whether
+        // they're in the room). Any other new chat — a different thread, or
+        // this one while backgrounded — still rings, as do non-chat alerts.
+        if (isBrandNew && !item.isRead && !_isViewingSource(item)) {
           // ignore: unawaited_futures
           ref.read(notificationSoundProvider).playBubble();
         }
@@ -156,6 +163,17 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
         }());
       }
     });
+  }
+
+  /// True when [item] is a chat push for the thread the user currently has
+  /// open and foregrounded — the one case the chime must skip. Non-chat
+  /// notifications (and chats for any other thread) return `false`, so they
+  /// ring normally.
+  bool _isViewingSource(NotificationItem item) {
+    if (item.kind != NotificationKind.chat) return false;
+    final threadKey = chatThreadKeyFromPayload(item.payload);
+    if (threadKey == null) return false;
+    return threadKey == ref.read(activeChatProvider);
   }
 
   /// Optimistically flips one row to read and writes through to the

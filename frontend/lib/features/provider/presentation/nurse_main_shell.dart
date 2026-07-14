@@ -9,6 +9,7 @@ import '../../auth/auth_provider.dart';
 import '../../doctor/doctor_providers.dart';
 import '../../doctor/services/location_tracking_service.dart';
 import '../../notifications/widgets/notification_bell.dart';
+import '../../chat/presentation/conversation_inbox_button.dart';
 import 'nurse_dashboard_tabs.dart';
 import 'nurse_profile_screen.dart';
 
@@ -194,6 +195,8 @@ class _NurseBanner extends ConsumerWidget {
                   ],
                 ),
               ),
+              const ConversationInboxButton(),
+              const SizedBox(width: 8),
               const NotificationBell(),
               IconButton(
                 tooltip: 'Sign out',

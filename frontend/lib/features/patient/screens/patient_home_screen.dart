@@ -26,6 +26,7 @@ import '../../../core/widgets/mt_skeleton.dart';
 import '../../auth/auth_provider.dart';
 import '../../../core/widgets/mt_search_field.dart';
 import '../../notifications/widgets/notification_bell.dart';
+import '../../chat/presentation/conversation_inbox_button.dart';
 import '../navigation/patient_nav_provider.dart';
 import '../new_request/new_request_notifier.dart';
 import 'widgets/dynamic_home_sections.dart';
@@ -350,6 +351,8 @@ class _HeaderRow extends ConsumerWidget {
             ],
           ),
         ),
+        const SizedBox(width: 8),
+        const ConversationInboxButton(),
         const SizedBox(width: 8),
         const NotificationBell(),
         const SizedBox(width: 10),

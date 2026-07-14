@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/auth/auth_provider.dart';
+import '../../features/notifications/providers/notification_provider.dart';
 import '../router/app_router.dart';
 import '../theme/mt_colors.dart';
 import '../theme/mt_text_styles.dart';
@@ -57,6 +58,13 @@ class _DispatchOverlayHostState extends ConsumerState<DispatchOverlayHost> {
 
   @override
   Widget build(BuildContext context) {
+    // Pin the app-wide notification hub alive for the whole signed-in
+    // session. It owns the chat chime (`notification_provider.dart`), and
+    // this host is the one widget mounted above every route — including
+    // full-screen chats whose AppBars don't carry the bell that would
+    // otherwise keep the (autoDispose) hub in scope. Without this, walking
+    // into a chat could tear the chime source down.
+    ref.watch(notificationProvider);
     // Side-effects (haptic + auto-dismiss timer) on each new alert.
     ref.listen<DispatchAlert?>(dispatchAlertProvider, _onAlert);
     final alert = ref.watch(dispatchAlertProvider);

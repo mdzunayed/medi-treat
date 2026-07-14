@@ -19,6 +19,7 @@ const doctorRouter = require('./routes/doctor');
 const appointmentsRouter = require('./routes/appointments');
 const usersRouter = require('./routes/users');
 const chatRouter = require('./routes/chat.routes');
+const conversationRouter = require('./routes/conversation.routes');
 const notificationRouter = require('./routes/notification.routes');
 const prescriptionRouter = require('./routes/prescriptions');
 const providerRouter = require('./routes/provider');
@@ -28,6 +29,12 @@ const fcmService = require('./services/fcmService');
 const { userRoomFor, roleRoomFor } = require('./services/notificationService');
 const { verifyToken } = require('./utils/jwt');
 const { notifyChatRecipient } = require('./controllers/chat.controller');
+const {
+  conversationRoomFor,
+  deliverConversationMessage,
+  markConversationRead,
+} = require('./controllers/conversation.controller');
+const Conversation = require('./models/Conversation');
 const Account = require('./models/Account');
 const Provider = require('./models/Provider');
 const Message = require('./models/Message');
@@ -89,6 +96,10 @@ app.use('/api/users', usersRouter);
 // Chat history (`GET /api/chat/:appointmentId`) + HTTP fallback send.
 // Real-time delivery rides on the Socket.io layer initialised below.
 app.use('/api/chat', chatRouter);
+// Multi-role conversation engine — inbox list, find-or-create thread,
+// paginated history, mark-read. Real-time delivery rides the Socket.io
+// `conversation:*` events initialised below.
+app.use('/api/conversations', conversationRouter);
 // Multi-role notification hub. List + mark-read + bulk-read endpoints;
 // live delivery rides on the Socket.io `new_notification` event below.
 app.use('/api/notifications', notificationRouter);
@@ -361,6 +372,78 @@ mongoose
           if (typeof ack === 'function') {
             ack({ ok: false, message: err.message || 'Server error' });
           }
+        }
+      });
+
+      // ── Multi-role conversation engine ──────────────────────────────────
+      // Parallel to the appointment-scoped events above; keyed by
+      // `conversationId` instead of `appointmentId`. Group-capable: fan-out
+      // is derived from the Conversation's participants, and unread counters
+      // are maintained per participant.
+
+      // Join a conversation room — membership is verified against the
+      // thread's participant list so a socket can't eavesdrop on a thread
+      // it isn't part of.
+      socket.on('conversation:join', async (conversationId) => {
+        try {
+          if (!mongoose.isValidObjectId(conversationId)) return;
+          const uid = socket.data.accountId;
+          if (uid) {
+            const convo = await Conversation.findById(
+              conversationId,
+              'participantIds'
+            ).lean();
+            const member = convo && (convo.participantIds || []).some(
+              (p) => String(p) === String(uid)
+            );
+            if (!member) {
+              console.warn(
+                `[socket] ${socket.id} denied conversation:join ${conversationId} (not a participant)`
+              );
+              return;
+            }
+          }
+          const room = conversationRoomFor(conversationId);
+          socket.join(room);
+          socket.data.rooms.add(room);
+        } catch (err) {
+          console.error('[socket] conversation:join failed:', err.message);
+        }
+      });
+
+      socket.on('conversation:leave', (conversationId) => {
+        if (!mongoose.isValidObjectId(conversationId)) return;
+        const room = conversationRoomFor(conversationId);
+        socket.leave(room);
+        socket.data.rooms.delete(room);
+      });
+
+      socket.on('conversation:send', async (payload, ack) => {
+        try {
+          const { conversationId, senderId, messageText, messageType, attachmentUrl } =
+            payload || {};
+          const json = await deliverConversationMessage(io, {
+            conversationId,
+            senderId,
+            messageText,
+            messageType,
+            attachmentUrl,
+          });
+          if (typeof ack === 'function') ack({ ok: true, message: json });
+        } catch (err) {
+          console.error('[socket] conversation:send failed:', err.message);
+          if (typeof ack === 'function') {
+            ack({ ok: false, message: err.message || 'Server error' });
+          }
+        }
+      });
+
+      socket.on('conversation:read', async (payload) => {
+        try {
+          const { conversationId, userId } = payload || {};
+          await markConversationRead(io, { conversationId, userId });
+        } catch (err) {
+          console.error('[socket] conversation:read failed:', err.message);
         }
       });
 

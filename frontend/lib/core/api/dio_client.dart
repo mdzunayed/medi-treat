@@ -754,6 +754,104 @@ class DioClient {
     }
   }
 
+  // ── Multi-role conversation engine ────────────────────────────────────────
+
+  /// `GET /api/conversations` — the signed-in user's inbox: every thread
+  /// they participate in, newest-activity first, each carrying their own
+  /// unread count. Returns the raw maps for the [Conversation] parser.
+  Future<List<Map<String, dynamic>>> getConversations() async {
+    try {
+      final res = await _dio.get<dynamic>('/api/conversations');
+      final data = res.data;
+      final List rawList;
+      if (data is Map && data['conversations'] is List) {
+        rawList = data['conversations'] as List;
+      } else if (data is List) {
+        rawList = data;
+      } else {
+        rawList = const [];
+      }
+      return [
+        for (final raw in rawList)
+          if (raw is Map) Map<String, dynamic>.from(raw),
+      ];
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// `POST /api/conversations` — find-or-create a thread for the given
+  /// participant account ids (the caller is always included server-side),
+  /// optionally anchored to a booking (`contextRequestId`). Returns the
+  /// conversation map so the caller can open it.
+  Future<Map<String, dynamic>> openConversation({
+    required List<String> participantIds,
+    String? contextRequestId,
+  }) async {
+    try {
+      final res = await _dio.post<dynamic>(
+        '/api/conversations',
+        data: {
+          'participantIds': participantIds,
+          'contextRequestId': ?contextRequestId,
+        },
+      );
+      final data = res.data;
+      if (data is Map && data['conversation'] is Map) {
+        return Map<String, dynamic>.from(data['conversation'] as Map);
+      }
+      if (data is Map) return Map<String, dynamic>.from(data);
+      throw Exception('Unexpected openConversation response');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// `GET /api/conversations/:id/messages` — paginated history, oldest-first.
+  /// Pass [before] (an ISO-8601 timestamp) to page backwards through older
+  /// messages.
+  Future<List<Map<String, dynamic>>> getConversationMessages(
+    String conversationId, {
+    String? before,
+    int limit = 50,
+  }) async {
+    try {
+      final res = await _dio.get<dynamic>(
+        '/api/conversations/$conversationId/messages',
+        queryParameters: {
+          'limit': limit,
+          'before': ?before,
+        },
+      );
+      final data = res.data;
+      final List rawList;
+      if (data is Map && data['messages'] is List) {
+        rawList = data['messages'] as List;
+      } else if (data is List) {
+        rawList = data;
+      } else {
+        rawList = const [];
+      }
+      return [
+        for (final raw in rawList)
+          if (raw is Map) Map<String, dynamic>.from(raw),
+      ];
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// `POST /api/conversations/:id/read` — HTTP fallback that resets the
+  /// caller's unread tally for a thread. The socket `conversation:read`
+  /// event is the primary path; this covers clients without a live socket.
+  Future<void> markConversationRead(String conversationId) async {
+    try {
+      await _dio.post<dynamic>('/api/conversations/$conversationId/read');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// `POST /api/appointments/:id/feedback` — submits a rating + tags
   /// for a completed visit. Server validates the tag allow-list and
   /// rejects double-submissions; both surface as Exceptions here so

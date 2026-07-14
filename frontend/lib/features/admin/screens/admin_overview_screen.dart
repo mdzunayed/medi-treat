@@ -9,6 +9,7 @@ import '../../../core/widgets/initials_avatar.dart';
 import '../../../core/widgets/mt_search_field.dart';
 import '../../auth/auth_provider.dart';
 import '../../notifications/widgets/notification_bell.dart';
+import '../../chat/presentation/conversation_inbox_button.dart';
 import '../admin_providers.dart';
 import 'tabs/admin_banner_management_page.dart';
 import 'tabs/admin_booking_review.dart';
@@ -714,6 +715,7 @@ class _AdminTopBarState extends ConsumerState<_AdminTopBar> {
           // Unified multi-role notification bell. Same widget the
           // patient + doctor headers use — the badge is pinned at
           // top-right and self-hides when unread == 0.
+          const ConversationInboxButton(framed: false),
           const NotificationBell(framed: false),
         ],
       ),

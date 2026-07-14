@@ -12,6 +12,7 @@ import '../../doctor/doctor_providers.dart';
 import '../../doctor/screens/doctor_profile_screen.dart';
 import '../../doctor/services/location_tracking_service.dart';
 import '../../notifications/widgets/notification_bell.dart';
+import '../../chat/presentation/conversation_inbox_button.dart';
 import 'doctor_dashboard_tabs.dart';
 
 /// Doctor Operations Hub shell — the single `/doctor/:name` destination.
@@ -266,6 +267,8 @@ class _DoctorBanner extends ConsumerWidget {
                   ],
                 ),
               ),
+              const ConversationInboxButton(),
+              const SizedBox(width: 8),
               const NotificationBell(),
               IconButton(
                 tooltip: 'My profile',
